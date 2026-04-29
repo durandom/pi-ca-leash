@@ -1,6 +1,6 @@
 export { ClaudeCodeTeamsBackend } from "./backend.js";
 export { defaultTeamsDir, writeTeammate, readTeammate, listTeammates, writeTask, readTask, listTasks } from "./persistence.js";
-export { formatTaskAssignment, mapState } from "./backend.js";
+export { classifyTaskReply, formatTaskAssignment, mapState } from "./backend.js";
 export type {
   SpawnTeammateInput,
   TeamMessageResult,

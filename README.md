@@ -20,17 +20,24 @@ Intercom bridge provides:
 - named runtime-backed peers
 - `send` / `ask` / `reply` orchestration
 - idle-cycle reply extraction
+- persisted peer registry with restart restore
+- optional live `pi-intercom` broker transport when broker is reachable
+- extension-side disconnect/reconnect notices and late rebinds
 - demo CLI harness
 
 Subagent backend provides:
 - `runner: claude-code-agent` execution backend
 - sync/async run lifecycle
 - run artifact persistence
+- startup rehydration from persisted runtime/run state
+- attention events for stale background runs
+- extension-side attention list / ack / snooze UX
 - result collection and control APIs
 
 Teams backend provides:
 - persistent Claude-backed teammate spawn/message/stop flows
-- simple task assignment lifecycle
+- teammate restore/reattach after backend restart
+- task auto-classification (`DONE:` / `BLOCKED:` style replies)
 - teammate/task persistence
 - demo CLI harness
 
@@ -69,6 +76,12 @@ pi install /absolute/path/to/pi-claude-code-agent
 
 This package now exposes a pi extension from `extensions/index.ts`.
 
+The extension currently adds:
+- live dashboard widget + status line
+- background dashboard refresh every 5s
+- explicit intercom disconnect/reconnect notices
+- attention notifications plus ack/snooze controls for noisy runs
+
 ## Extension commands
 
 After install, start pi in this repo and use:
@@ -82,6 +95,9 @@ After install, start pi in this repo and use:
 /claude-subagent-run <task>
 /claude-subagent-list
 /claude-subagent-status <runId>
+/claude-attention-list
+/claude-attention-ack <runId-prefix>
+/claude-attention-snooze <runId-prefix> [minutes]
 
 /claude-team-spawn <name> | <prompt>
 /claude-team-task <name> | <title> | <details>
@@ -101,9 +117,11 @@ State is persisted under:
 ## Current roadmap
 
 1. `@pi-claude-code-agent/runtime` — implemented
-2. `@pi-claude-code-agent/intercom-bridge` — implemented as host-side MVP
-3. `@pi-claude-code-agent/subagents-backend` — implemented as host-side MVP
-4. `@pi-claude-code-agent/teams-backend` — implemented as host-side MVP
+2. `@pi-claude-code-agent/intercom-bridge` — implemented, with persisted registry and optional live `pi-intercom` transport
+3. `@pi-claude-code-agent/subagents-backend` — implemented, with restart rehydration and attention events
+4. `@pi-claude-code-agent/teams-backend` — implemented, with teammate restore and task auto-classification
+
+Extension test coverage now lives in `extensions/support.test.ts` for dashboard/attention/intercom monitor helpers.
 
 See:
 - `docs/IMPLEMENTATION_PLAN.md`

@@ -1,28 +1,42 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { ClaudeRuntimeIntercomBridge } from "@pi-claude-code-agent/intercom-bridge";
+import { resolve } from "node:path";
+import { ClaudeRuntimeIntercomBridge, PiIntercomTransport } from "@pi-claude-code-agent/intercom-bridge";
 import { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime";
 import { ClaudeCodeSubagentBackend } from "@pi-claude-code-agent/subagents-backend";
 import { ClaudeCodeTeamsBackend } from "@pi-claude-code-agent/teams-backend";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { Box, Text, truncateToWidth, visibleWidth, type AutocompleteItem } from "@mariozechner/pi-tui";
+import {
+  acknowledgeAttention,
+  createAttentionLedger,
+  createDashboardState,
+  describeAttentionState,
+  detectConnectivityTransition,
+  hasAttentionNote,
+  listAttentionViews,
+  recordDashboardEvent,
+  recordDashboardRefresh,
+  reconcileAttentionLedger,
+  shouldRebindTransport,
+  snoozeAttention,
+  type AttentionLedger,
+  type AttentionView,
+  type DashboardState,
+} from "./support.js";
 
-interface RegistryFile {
-  peers: Record<string, string>;
-}
-
-interface DashboardState {
-  lastEvent: string;
-  lastUpdatedAt: number;
-}
+const BACKGROUND_POLL_INTERVAL_MS = 5_000;
+const DEFAULT_SNOOZE_MINUTES = 15;
 
 interface DashboardSnapshot {
   sessions: number;
   peers: number;
   peerBusy: number;
   peerIssues: number;
+  intercomLive: boolean;
+  intercomBoundPeers: number;
+  intercomConnectedPeers: number;
   runs: number;
   runActive: number;
+  runAttention: number;
   runIssues: number;
   teammates: number;
   teammateBusy: number;
@@ -31,7 +45,8 @@ interface DashboardSnapshot {
   openTasks: number;
   taskIssues: number;
   lastEvent: string;
-  lastUpdatedAt: number;
+  lastEventAt: number;
+  lastRefreshedAt: number;
 }
 
 interface DashboardData {
@@ -41,6 +56,7 @@ interface DashboardData {
   runs: Awaited<ReturnType<ClaudeCodeSubagentBackend["listRuns"]>>;
   teammates: Awaited<ReturnType<ClaudeCodeTeamsBackend["listTeammates"]>>;
   tasks: Awaited<ReturnType<ClaudeCodeTeamsBackend["listTasks"]>>;
+  attention: AttentionView[];
 }
 
 type CommandMessageLevel = "info" | "success" | "warning" | "error";
@@ -52,15 +68,17 @@ interface CommandMessageDetails {
   timestamp: number;
 }
 
+let dashboardContextRef: ExtensionContext | ExtensionCommandContext | undefined;
+
 export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
   const cwd = process.cwd();
   const rootDir = resolve(cwd, ".pi-claude-code-agent");
-  const registryPath = resolve(rootDir, "registry.json");
   const runtime = new ClaudeCodeRuntime({
     storageDir: resolve(rootDir, "runtime"),
   });
   const bridge = new ClaudeRuntimeIntercomBridge({
     runtime,
+    storageDir: resolve(rootDir, "bridge"),
   });
   const subagents = new ClaudeCodeSubagentBackend({
     runtime,
@@ -71,15 +89,113 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
     bridge,
   });
 
-  await restoreBridgePeers(bridge, teams, registryPath);
-  const peerNameCache = new Set((await bridge.listPeers()).map((peer) => peer.name));
+  let intercomTransport: PiIntercomTransport | undefined;
+  let intercomReachable: boolean | undefined;
+  let backgroundMonitorTimer: NodeJS.Timeout | undefined;
+  let attentionLedger: AttentionLedger = createAttentionLedger();
 
-  const extensionVersion = "dev-reload-5";
+  const extensionVersion = "dev-reload-6";
   const startupSummary = `pi-claude-code-agent ${extensionVersion} loaded`;
-  const dashboardState: DashboardState = {
-    lastEvent: startupSummary,
-    lastUpdatedAt: Date.now(),
-  };
+  const dashboardState: DashboardState = createDashboardState(startupSummary);
+
+  await bridge.restorePeers();
+  await teams.listTeammates();
+
+  async function bindIntercomTransport(): Promise<void> {
+    intercomTransport = new PiIntercomTransport();
+    await bridge.setTransport(intercomTransport);
+  }
+
+  async function unbindIntercomTransport(): Promise<void> {
+    await bridge.setTransport(undefined);
+    intercomTransport = undefined;
+  }
+
+  async function ensureIntercomTransportHealthy(announce: boolean): Promise<boolean> {
+    const reachable = await PiIntercomTransport.canConnect().catch(() => false);
+    const transition = detectConnectivityTransition(intercomReachable, reachable);
+    intercomReachable = reachable;
+
+    if (!reachable) {
+      if (intercomTransport) {
+        await unbindIntercomTransport();
+      }
+      if (announce && transition === "disconnected") {
+        recordDashboardEvent(dashboardState, "Intercom broker disconnected");
+        sendCommandMessage(pi, {
+          level: "warning",
+          title: "Intercom disconnected",
+          body: "Broker unreachable. Claude peers stay local until broker connectivity returns.",
+        });
+      }
+      return false;
+    }
+
+    const transportStatus = await bridge.transportStatus();
+    const needsRebind = intercomTransport ? shouldRebindTransport(transportStatus) : false;
+    if (!intercomTransport || needsRebind) {
+      if (intercomTransport) {
+        await unbindIntercomTransport();
+      }
+      await bindIntercomTransport();
+      if (announce && (transition === "connected" || needsRebind)) {
+        recordDashboardEvent(dashboardState, needsRebind ? "Intercom transport rebound" : "Intercom broker reconnected");
+        sendCommandMessage(pi, {
+          level: "success",
+          title: needsRebind ? "Intercom transport rebound" : "Intercom reconnected",
+          body: needsRebind
+            ? "Broker reachable again. Existing Claude peers were rebound to live intercom transport."
+            : "Broker reachable again. Claude peers are back on live intercom transport.",
+        });
+      }
+    }
+
+    return true;
+  }
+
+  async function syncAttentionLedger() {
+    const runs = await subagents.listRuns();
+    const next = reconcileAttentionLedger(attentionLedger, runs, Date.now());
+    attentionLedger = next.ledger;
+    return next;
+  }
+
+  async function refreshVisibleDashboard(lastEvent?: string): Promise<void> {
+    if (!dashboardContextRef) {
+      return;
+    }
+    await refreshDashboard(dashboardContextRef, runtime, bridge, subagents, teams, dashboardState, attentionLedger, lastEvent);
+  }
+
+  async function pollBackground(): Promise<void> {
+    await ensureIntercomTransportHealthy(true);
+    const attention = await syncAttentionLedger();
+
+    for (const run of attention.notify) {
+      recordDashboardEvent(dashboardState, `Attention ${shortId(run.runId)} · ${run.agentName}`);
+      sendCommandMessage(pi, {
+        level: "warning",
+        title: `Run needs attention: ${shortId(run.runId)}`,
+        body: [run.agentName, run.note].filter(Boolean).join("\n\n"),
+      });
+    }
+
+    await refreshVisibleDashboard();
+  }
+
+  function startBackgroundMonitor(): void {
+    if (backgroundMonitorTimer) {
+      return;
+    }
+    backgroundMonitorTimer = setInterval(() => {
+      void pollBackground();
+    }, BACKGROUND_POLL_INTERVAL_MS);
+    backgroundMonitorTimer.unref?.();
+  }
+
+  startBackgroundMonitor();
+  await ensureIntercomTransportHealthy(false);
+  const peerNameCache = new Set((await bridge.listPeers()).map((peer) => peer.name));
 
   pi.registerMessageRenderer("claude-command-result", (message, { expanded }, theme) => {
     const details = (message.details ?? {}) as Partial<CommandMessageDetails>;
@@ -109,13 +225,28 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (event, ctx) => {
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `${startupSummary} (${event.reason})`);
+    await ensureIntercomTransportHealthy(false);
+    await syncAttentionLedger();
+    startBackgroundMonitor();
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `${startupSummary} (${event.reason})`);
     ctx.ui.notify(`${startupSummary} (${event.reason})`, "info");
+  });
+
+  pi.on("session_shutdown", async () => {
+    dashboardContextRef = undefined;
+    if (backgroundMonitorTimer) {
+      clearInterval(backgroundMonitorTimer);
+      backgroundMonitorTimer = undefined;
+    }
+    await bridge.close();
+    intercomTransport = undefined;
+    intercomReachable = undefined;
+    attentionLedger = createAttentionLedger();
   });
 
   registerClaudeCommand(pi, "claude-dev-ping", "Proof that pi-claude-code-agent reloaded successfully", async (_args, ctx) => {
     const sessions = await runtime.list();
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Ping ok · s=${sessions.length}`);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Ping ok · s=${sessions.length}`);
     sendCommandMessage(pi, {
       level: "success",
       command: "claude-dev-ping",
@@ -125,9 +256,10 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
   });
 
   registerClaudeCommand(pi, "claude-dashboard", "Show Claude dashboard diagnostics", async (_args, ctx) => {
-    const initial = await collectDashboardData(runtime, bridge, subagents, teams, dashboardState);
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Dashboard · s=${initial.snapshot.sessions} p=${initial.snapshot.peers} r=${initial.snapshot.runs}`);
-    const data = await collectDashboardData(runtime, bridge, subagents, teams, dashboardState);
+    await syncAttentionLedger();
+    const initial = await collectDashboardData(runtime, bridge, subagents, teams, dashboardState, attentionLedger);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Dashboard · s=${initial.snapshot.sessions} p=${initial.snapshot.peers} r=${initial.snapshot.runs}`);
+    const data = await collectDashboardData(runtime, bridge, subagents, teams, dashboardState, attentionLedger);
     const severity = getDashboardSeverity(data.snapshot);
     sendCommandMessage(pi, {
       level: severity === "error" ? "error" : severity === "warning" ? "warning" : "info",
@@ -147,6 +279,7 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
       return;
     }
 
+    await ensureIntercomTransportHealthy(false);
     const peer = await bridge.launchPeer({
       name,
       prompt,
@@ -154,8 +287,7 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
       permissionMode: "bypassPermissions",
     });
     peerNameCache.add(peer.name);
-    await rememberPeer(registryPath, peer.name, peer.sessionId);
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Peer + ${peer.name}`);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer + ${peer.name}`);
     sendCommandMessage(pi, {
       level: "success",
       command: "claude-peer-start",
@@ -167,7 +299,7 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
   registerClaudeCommand(pi, "claude-peer-list", "List known Claude peers", async (_args, ctx) => {
     const peers = await bridge.listPeers();
     syncNameCache(peerNameCache, peers.map((peer) => peer.name));
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Peers · ${peers.length}`);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peers · ${peers.length}`);
     sendCommandMessage(pi, {
       level: peers.some((peer) => isProblemState(peer.state)) ? "warning" : "info",
       command: "claude-peer-list",
@@ -191,11 +323,11 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
       }
 
       const result = await bridge.ask(name, {
-      from: "pi-user",
-      text: message,
+        from: "pi-user",
+        text: message,
       });
       peerNameCache.add(name);
-      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Peer ← ${name}`);
+      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer ← ${name}`);
       sendCommandMessage(pi, {
         level: result.runState === "failed" ? "error" : result.runState === "interrupted" ? "warning" : "success",
         command: "claude-peer-ask",
@@ -222,8 +354,7 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
 
       const peer = await bridge.stop(name);
       peerNameCache.delete(name);
-      await forgetPeer(registryPath, name);
-      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Peer - ${peer.name}`);
+      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer - ${peer.name}`);
       sendCommandMessage(pi, {
         level: "warning",
         command: "claude-peer-stop",
@@ -250,7 +381,8 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
       },
       task,
     });
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Run ${shortId(run.runId)} ${run.state}`);
+    await syncAttentionLedger();
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Run ${shortId(run.runId)} ${run.state}`);
     sendCommandMessage(pi, {
       level: runStateLevel(run.state),
       command: "claude-subagent-run",
@@ -265,13 +397,18 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
 
   registerClaudeCommand(pi, "claude-subagent-list", "List Claude subagent runs", async (_args, ctx) => {
     const runs = await subagents.listRuns();
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Runs · ${runs.length}`);
+    const attentionViews = listAttentionViews(attentionLedger, runs, Date.now());
+    const attentionByRunId = new Map(attentionViews.map((view) => [view.run.runId, describeAttentionState(view, Date.now())]));
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Runs · ${runs.length}`);
     sendCommandMessage(pi, {
-      level: runs.some((run) => ["failed", "interrupted"].includes(run.state)) ? "warning" : "info",
+      level: runs.some((run) => ["failed", "interrupted"].includes(run.state) || hasAttentionNote(run.note)) ? "warning" : "info",
       command: "claude-subagent-list",
       title: `Runs (${runs.length})`,
       body: runs.length > 0
-        ? runs.map((run) => `${shortId(run.runId)}  ${run.state}  ${run.agentName}`).join("\n")
+        ? runs.map((run) => {
+          const attention = attentionByRunId.get(run.runId);
+          return `${shortId(run.runId)}  ${run.state}${attention ? `  [${attention}]` : ""}  ${run.agentName}`;
+        }).join("\n")
         : "No runs found.",
     });
   });
@@ -293,15 +430,75 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
       return;
     }
 
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Run ${shortId(run.runId)} ${run.state}`);
+    await syncAttentionLedger();
+    const attentionView = listAttentionViews(attentionLedger, [run], Date.now())[0];
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Run ${shortId(run.runId)} ${run.state}`);
     sendCommandMessage(pi, {
       level: runStateLevel(run.state),
       command: "claude-subagent-status",
       title: `Run ${shortId(run.runId)} · ${run.state}`,
       body: [
         `agent ${run.agentName}`,
+        attentionView ? `attention ${describeAttentionState(attentionView, Date.now())}` : undefined,
+        run.note ? `note\n${run.note}` : undefined,
         run.result?.summary ? `summary\n${truncate(run.result.summary, 1200)}` : undefined,
       ].filter(Boolean).join("\n\n"),
+    });
+  });
+
+  registerClaudeCommand(pi, "claude-attention-list", "List runs that currently need attention", async (_args, ctx) => {
+    const attention = await syncAttentionLedger();
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Attention · ${attention.active.length}`);
+    sendCommandMessage(pi, {
+      level: attention.active.length > 0 ? "warning" : "info",
+      command: "claude-attention-list",
+      title: `Attention (${attention.active.length})`,
+      body: formatAttentionReport(attention.active),
+    });
+  });
+
+  registerClaudeCommand(pi, "claude-attention-ack", "Acknowledge noisy attention for a run. Args: <runId-prefix>", async (args, ctx) => {
+    const token = args.trim();
+    if (!token) {
+      showUsage(pi, "claude-attention-ack", "/claude-attention-ack <runId-prefix>");
+      return;
+    }
+
+    const attention = await syncAttentionLedger();
+    const view = resolveAttentionRun(token, attention.active);
+    attentionLedger = acknowledgeAttention(attentionLedger, view.run.runId);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Attention ack ${shortId(view.run.runId)}`);
+    sendCommandMessage(pi, {
+      level: "success",
+      command: "claude-attention-ack",
+      title: `Acknowledged: ${shortId(view.run.runId)}`,
+      body: [view.run.agentName, view.run.note].filter(Boolean).join("\n\n"),
+    });
+  });
+
+  registerClaudeCommand(pi, "claude-attention-snooze", "Snooze noisy attention for a run. Args: <runId-prefix> [minutes]", async (args, ctx) => {
+    const [token, minutesToken] = args.trim().split(/\s+/, 2).filter(Boolean);
+    if (!token) {
+      showUsage(pi, "claude-attention-snooze", "/claude-attention-snooze <runId-prefix> [minutes]");
+      return;
+    }
+
+    const minutes = minutesToken ? Number(minutesToken) : DEFAULT_SNOOZE_MINUTES;
+    if (!Number.isFinite(minutes) || minutes <= 0) {
+      showUsage(pi, "claude-attention-snooze", "/claude-attention-snooze <runId-prefix> [minutes]");
+      return;
+    }
+
+    const attention = await syncAttentionLedger();
+    const view = resolveAttentionRun(token, attention.active);
+    const snoozedUntil = Date.now() + minutes * 60_000;
+    attentionLedger = snoozeAttention(attentionLedger, view.run.runId, snoozedUntil);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Attention snoozed ${shortId(view.run.runId)}`);
+    sendCommandMessage(pi, {
+      level: "success",
+      command: "claude-attention-snooze",
+      title: `Snoozed: ${shortId(view.run.runId)}`,
+      body: `${view.run.agentName}\n\nuntil ${new Date(snoozedUntil).toLocaleTimeString()}`,
     });
   });
 
@@ -312,14 +509,14 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
       return;
     }
 
+    await ensureIntercomTransportHealthy(false);
     const teammate = await teams.spawnTeammate({
       name,
       prompt,
       cwd,
     });
     peerNameCache.add(teammate.name);
-    await rememberPeer(registryPath, teammate.name, teammate.sessionId ?? "");
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Team + ${teammate.name}`);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Team + ${teammate.name}`);
     sendCommandMessage(pi, {
       level: "success",
       command: "claude-team-spawn",
@@ -340,7 +537,7 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
       title,
       details,
     });
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Task ${shortId(task.taskId)} ${task.state}`);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Task ${shortId(task.taskId)} ${task.state}`);
     sendCommandMessage(pi, {
       level: task.state === "blocked" ? "warning" : "success",
       command: "claude-team-task",
@@ -360,7 +557,7 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
     }
 
     const result = await teams.sendMessage(name, message);
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Team ← ${result.teammate.name}`);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Team ← ${result.teammate.name}`);
     sendCommandMessage(pi, {
       level: "success",
       command: "claude-team-message",
@@ -372,7 +569,7 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
   registerClaudeCommand(pi, "claude-team-list", "List Claude teammates and tasks", async (_args, ctx) => {
     const teammates = await teams.listTeammates();
     const tasks = await teams.listTasks();
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Team/Todo · ${teammates.length}/${tasks.length}`);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Team/Todo · ${teammates.length}/${tasks.length}`);
     sendCommandMessage(pi, {
       level: teammates.some((teammate) => isProblemState(teammate.state)) || tasks.some((task) => ["blocked", "cancelled"].includes(task.state)) ? "warning" : "info",
       command: "claude-team-list",
@@ -396,8 +593,7 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
 
     const teammate = await teams.stopTeammate(name);
     peerNameCache.delete(name);
-    await forgetPeer(registryPath, name);
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Team - ${teammate.name}`);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Team - ${teammate.name}`);
     sendCommandMessage(pi, {
       level: "warning",
       command: "claude-team-stop",
@@ -408,7 +604,7 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
 
   registerClaudeCommand(pi, "claude-runtime-list", "List raw Claude runtime sessions", async (_args, ctx) => {
     const sessions = await runtime.list();
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, `Runtime · ${sessions.length}`);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Runtime · ${sessions.length}`);
     sendCommandMessage(pi, {
       level: sessions.some((session) => ["failed", "interrupted"].includes(session.state)) ? "warning" : "info",
       command: "claude-runtime-list",
@@ -483,16 +679,21 @@ async function refreshDashboard(
   subagents: ClaudeCodeSubagentBackend,
   teams: ClaudeCodeTeamsBackend,
   state: DashboardState,
-  lastEvent: string,
+  attentionLedger: AttentionLedger,
+  lastEvent?: string,
 ): Promise<void> {
-  state.lastEvent = lastEvent;
-  state.lastUpdatedAt = Date.now();
+  dashboardContextRef = ctx;
+  if (lastEvent) {
+    recordDashboardEvent(state, lastEvent);
+  } else {
+    recordDashboardRefresh(state);
+  }
 
-  const { snapshot } = await collectDashboardData(runtime, bridge, subagents, teams, state);
+  const { snapshot } = await collectDashboardData(runtime, bridge, subagents, teams, state, attentionLedger);
 
   ctx.ui.setStatus(
     "pi-claude-code-agent",
-    `cca s:${snapshot.sessions} p:${snapshot.peers} r:${snapshot.runs} tm:${snapshot.teammates} tk:${snapshot.tasks}`,
+    `cca ic:${snapshot.intercomLive ? "on" : "off"} s:${snapshot.sessions} p:${snapshot.peers} r:${snapshot.runs} a:${snapshot.runAttention} tm:${snapshot.teammates} tk:${snapshot.tasks}`,
   );
   ctx.ui.setWidget("claude-dashboard", createDashboardWidget(snapshot));
 }
@@ -511,19 +712,21 @@ function createDashboardWidget(snapshot: DashboardSnapshot) {
 
       const line1 = joinLeftRight(title, health, width);
       const line2 = truncateToWidth([
+        metric(theme, "ic", snapshot.intercomConnectedPeers, snapshot.intercomLive ? "success" : "warning"),
         metric(theme, "s", snapshot.sessions),
         metric(theme, "p", snapshot.peers, snapshot.peerIssues > 0 ? "error" : snapshot.peerBusy > 0 ? "warning" : "text"),
-        metric(theme, "r", snapshot.runs, snapshot.runIssues > 0 ? "error" : snapshot.runActive > 0 ? "warning" : "text"),
+        metric(theme, "r", snapshot.runs, snapshot.runIssues > 0 ? "error" : snapshot.runAttention > 0 || snapshot.runActive > 0 ? "warning" : "text"),
         metric(theme, "tm", snapshot.teammates, snapshot.teammateIssues > 0 ? "error" : snapshot.teammateBusy > 0 ? "warning" : "text"),
         metric(theme, "tk", snapshot.tasks, snapshot.taskIssues > 0 ? "warning" : snapshot.openTasks > 0 ? "accent" : "text"),
       ].join("   "), width);
       const line3 = truncateToWidth([
         metric(theme, "busy", snapshot.peerBusy + snapshot.runActive + snapshot.teammateBusy, snapshot.peerBusy + snapshot.runActive + snapshot.teammateBusy > 0 ? "warning" : "success"),
+        metric(theme, "attn", snapshot.runAttention, snapshot.runAttention > 0 ? "warning" : "success"),
         metric(theme, "issues", snapshot.peerIssues + snapshot.runIssues + snapshot.teammateIssues + snapshot.taskIssues, snapshot.peerIssues + snapshot.runIssues + snapshot.teammateIssues + snapshot.taskIssues > 0 ? "error" : "success"),
         metric(theme, "open", snapshot.openTasks, snapshot.openTasks > 0 ? "accent" : "text"),
       ].join("   "), width);
       const line4 = truncateToWidth(
-        `${theme.fg("dim", formatTime(snapshot.lastUpdatedAt))}  ${theme.fg(classifyEventColor(snapshot.lastEvent), snapshot.lastEvent)}`,
+        `${theme.fg("dim", `ref ${formatTime(snapshot.lastRefreshedAt)}`)}  ${theme.fg("muted", `evt ${formatTime(snapshot.lastEventAt)}`)}  ${theme.fg(classifyEventColor(snapshot.lastEvent), snapshot.lastEvent)}`,
         width,
       );
 
@@ -538,14 +741,17 @@ async function collectDashboardData(
   subagents: ClaudeCodeSubagentBackend,
   teams: ClaudeCodeTeamsBackend,
   state: DashboardState,
+  attentionLedger: AttentionLedger,
 ): Promise<DashboardData> {
-  const [sessions, peers, runs, teammates, tasks] = await Promise.all([
+  const [sessions, peers, runs, teammates, tasks, transportStatus] = await Promise.all([
     runtime.list(),
     bridge.listPeers(),
     subagents.listRuns(),
     teams.listTeammates(),
     teams.listTasks(),
+    bridge.transportStatus(),
   ]);
+  const attention = listAttentionViews(attentionLedger, runs, Date.now());
 
   return {
     snapshot: {
@@ -553,8 +759,12 @@ async function collectDashboardData(
       peers: peers.length,
       peerBusy: peers.filter((peer) => ["busy", "starting"].includes(peer.state)).length,
       peerIssues: peers.filter((peer) => isProblemState(peer.state)).length,
+      intercomLive: bridge.hasTransport(),
+      intercomBoundPeers: transportStatus?.boundPeers ?? 0,
+      intercomConnectedPeers: transportStatus?.connectedPeers ?? 0,
       runs: runs.length,
       runActive: runs.filter((run) => ["queued", "starting", "running"].includes(run.state)).length,
+      runAttention: attention.length,
       runIssues: runs.filter((run) => ["failed", "interrupted"].includes(run.state)).length,
       teammates: teammates.length,
       teammateBusy: teammates.filter((teammate) => ["starting", "busy"].includes(teammate.state)).length,
@@ -563,13 +773,15 @@ async function collectDashboardData(
       openTasks: tasks.filter((task) => !["done", "cancelled"].includes(task.state)).length,
       taskIssues: tasks.filter((task) => ["blocked", "cancelled"].includes(task.state)).length,
       lastEvent: state.lastEvent,
-      lastUpdatedAt: state.lastUpdatedAt,
+      lastEventAt: state.lastEventAt,
+      lastRefreshedAt: state.lastRefreshedAt,
     },
     sessions,
     peers,
     runs,
     teammates,
     tasks,
+    attention,
   };
 }
 
@@ -637,7 +849,7 @@ function getDashboardSeverity(snapshot: DashboardSnapshot): "ok" | "warning" | "
   if (snapshot.peerIssues + snapshot.runIssues + snapshot.teammateIssues + snapshot.taskIssues > 0) {
     return "error";
   }
-  if (snapshot.peerBusy + snapshot.runActive + snapshot.teammateBusy + snapshot.openTasks > 0) {
+  if (snapshot.runAttention > 0 || snapshot.peerBusy + snapshot.runActive + snapshot.teammateBusy + snapshot.openTasks > 0) {
     return "warning";
   }
   return "ok";
@@ -655,20 +867,23 @@ function formatPeerList(peers: Awaited<ReturnType<ClaudeRuntimeIntercomBridge["l
 }
 
 function formatDashboardReport(data: DashboardData): string {
-  const { snapshot, peers, runs, teammates, tasks, sessions } = data;
+  const now = Date.now();
+  const { snapshot, peers, runs, teammates, tasks, sessions, attention } = data;
+  const attentionByRunId = new Map(attention.map((view) => [view.run.runId, describeAttentionState(view, now)]));
   const sections = [
     `health   ${getDashboardSeverity(snapshot)}`,
-    `updated  ${formatTime(snapshot.lastUpdatedAt)}`,
-    `event    ${snapshot.lastEvent}`,
+    `updated  ${formatTime(snapshot.lastRefreshedAt)}`,
+    `event    ${formatTime(snapshot.lastEventAt)}  ${snapshot.lastEvent}`,
+    `intercom ${snapshot.intercomLive ? `live (${snapshot.intercomConnectedPeers}/${snapshot.intercomBoundPeers})` : "off"}`,
     "",
     formatTable(
-      ["kind", "total", "active", "issues"],
+      ["kind", "total", "active", "attn", "issues"],
       [
-        ["sessions", String(snapshot.sessions), "-", countWhere(sessions, (session) => ["failed", "interrupted"].includes(session.state))],
-        ["peers", String(snapshot.peers), String(snapshot.peerBusy), String(snapshot.peerIssues)],
-        ["runs", String(snapshot.runs), String(snapshot.runActive), String(snapshot.runIssues)],
-        ["teammates", String(snapshot.teammates), String(snapshot.teammateBusy), String(snapshot.teammateIssues)],
-        ["tasks", String(snapshot.tasks), String(snapshot.openTasks), String(snapshot.taskIssues)],
+        ["sessions", String(snapshot.sessions), "-", "-", countWhere(sessions, (session) => ["failed", "interrupted"].includes(session.state))],
+        ["peers", String(snapshot.peers), String(snapshot.peerBusy), "-", String(snapshot.peerIssues)],
+        ["runs", String(snapshot.runs), String(snapshot.runActive), String(snapshot.runAttention), String(snapshot.runIssues)],
+        ["teammates", String(snapshot.teammates), String(snapshot.teammateBusy), "-", String(snapshot.teammateIssues)],
+        ["tasks", String(snapshot.tasks), String(snapshot.openTasks), "-", String(snapshot.taskIssues)],
       ],
     ),
   ];
@@ -682,7 +897,25 @@ function formatDashboardReport(data: DashboardData): string {
       "Runs",
       formatTable(
         ["run", "state", "agent"],
-        runs.slice(0, 8).map((run) => [shortId(run.runId, 12), run.state, run.agentName]),
+        runs.slice(0, 8).map((run) => {
+          const attentionState = attentionByRunId.get(run.runId);
+          return [shortId(run.runId, 12), attentionState ? `${run.state} [${attentionState}]` : run.state, run.agentName];
+        }),
+      ),
+    );
+  }
+  if (attention.length > 0) {
+    sections.push(
+      "",
+      "Attention",
+      formatTable(
+        ["run", "agent", "alert", "note"],
+        attention.slice(0, 8).map((view) => [
+          shortId(view.run.runId, 12),
+          view.run.agentName,
+          describeAttentionState(view, now),
+          truncate(view.run.note ?? "", 72),
+        ]),
       ),
     );
   }
@@ -710,6 +943,22 @@ function formatDashboardReport(data: DashboardData): string {
   return sections.join("\n");
 }
 
+function formatAttentionReport(attention: AttentionView[]): string {
+  if (attention.length === 0) {
+    return "No active attention runs.";
+  }
+  const now = Date.now();
+  return formatTable(
+    ["run", "state", "agent", "note"],
+    attention.map((view) => [
+      shortId(view.run.runId, 12),
+      describeAttentionState(view, now),
+      view.run.agentName,
+      truncate(view.run.note ?? "", 72),
+    ]),
+  );
+}
+
 function formatTable(headers: string[], rows: string[][]): string {
   const matrix = [headers, ...rows].map((row) => row.map((cell) => cell ?? ""));
   const widths = headers.map((_, index) => Math.max(...matrix.map((row) => row[index]?.length ?? 0)));
@@ -727,10 +976,10 @@ function classifyEventColor(lastEvent: string): string {
   if (text.includes("failed") || text.includes("error") || text.includes("unknown") || text.includes("issues")) {
     return "error";
   }
-  if (text.includes("interrupted") || text.includes("stopped") || text.includes("usage") || text.includes("-") || text.includes("·")) {
+  if (text.includes("attention") || text.includes("interrupted") || text.includes("stopped") || text.includes("usage") || text.includes("disconnect") || text.includes("-") || text.includes("·")) {
     return "warning";
   }
-  if (text.includes("ping ok") || text.includes("+") || text.includes("←") || text.includes("reply")) {
+  if (text.includes("ping ok") || text.includes("connected") || text.includes("rebound") || text.includes("+") || text.includes("←") || text.includes("reply")) {
     return "success";
   }
   return "text";
@@ -766,64 +1015,13 @@ function isProblemState(state: string): boolean {
   return ["errored", "disconnected", "interrupted", "failed"].includes(state);
 }
 
-async function restoreBridgePeers(
-  bridge: ClaudeRuntimeIntercomBridge,
-  teams: ClaudeCodeTeamsBackend,
-  registryPath: string,
-): Promise<void> {
-  const registry = await readRegistry(registryPath);
-  for (const [name, sessionId] of Object.entries(registry.peers)) {
-    if (!sessionId) {
-      continue;
-    }
-    try {
-      await bridge.attachPeer({ name, sessionId });
-    } catch {
-      // Ignore stale registry entries.
-    }
+function resolveAttentionRun(token: string, attention: AttentionView[]): AttentionView {
+  const matches = attention.filter((view) => view.run.runId.startsWith(token));
+  if (matches.length === 1) {
+    return matches[0]!;
   }
-
-  try {
-    const teammates = await teams.listTeammates();
-    for (const teammate of teammates) {
-      if (!teammate.sessionId) {
-        continue;
-      }
-      try {
-        await bridge.attachPeer({ name: teammate.name, sessionId: teammate.sessionId });
-      } catch {
-        // Ignore stale teammate entries.
-      }
-    }
-  } catch {
-    // Ignore empty/uninitialized team storage.
+  if (matches.length > 1) {
+    throw new Error(`Ambiguous run id prefix ${token}`);
   }
-}
-
-async function rememberPeer(registryPath: string, name: string, sessionId: string): Promise<void> {
-  const registry = await readRegistry(registryPath);
-  registry.peers[name] = sessionId;
-  await writeRegistry(registryPath, registry);
-}
-
-async function forgetPeer(registryPath: string, name: string): Promise<void> {
-  const registry = await readRegistry(registryPath);
-  delete registry.peers[name];
-  await writeRegistry(registryPath, registry);
-}
-
-async function readRegistry(registryPath: string): Promise<RegistryFile> {
-  try {
-    return JSON.parse(await readFile(registryPath, "utf8")) as RegistryFile;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return { peers: {} };
-    }
-    throw error;
-  }
-}
-
-async function writeRegistry(registryPath: string, registry: RegistryFile): Promise<void> {
-  await mkdir(dirname(registryPath), { recursive: true });
-  await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf8");
+  throw new Error(`No active attention run matches ${token}`);
 }

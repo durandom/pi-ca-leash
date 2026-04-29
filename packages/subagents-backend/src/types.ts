@@ -80,6 +80,8 @@ export interface RuntimeSubagentBackendOptions {
   storageDir?: string;
   pollIntervalMs?: number;
   completionTimeoutMs?: number;
+  needsAttentionAfterMs?: number;
+  attentionPollIntervalMs?: number;
 }
 
 export interface PersistedRunStatus {

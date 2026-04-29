@@ -15,7 +15,10 @@ class FakeDriver implements RuntimeDriver {
     let interrupted = false;
     const done = (async () => {
       await onEvent({ type: "raw", payload: { type: "system", subtype: "init", session_id: input.resumeSessionId ?? input.sessionId, model: input.model ?? "fake-model" } });
-      await onEvent({ type: "raw", payload: { type: "assistant", message: { content: [{ type: "text", text: `teammate:${input.prompt}` }] } } });
+      const text = input.prompt.includes("Ship it")
+        ? "DONE: shipped"
+        : `teammate:${input.prompt}`;
+      await onEvent({ type: "raw", payload: { type: "assistant", message: { content: [{ type: "text", text }] } } });
       await onEvent({ type: "raw", payload: { type: "result", is_error: false, result: `done:${input.prompt}`, stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 2 } } });
       return { code: interrupted ? 130 : 0, signal: interrupted ? "SIGINT" : null } as const;
     })();
@@ -46,6 +49,36 @@ test("spawn teammate, assign task, exchange message, stop", async () => {
 
   const stopped = await backend.stopTeammate("worker");
   assert.equal(stopped.state, "stopped");
+});
+
+test("backend restores persisted teammates after restart", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "claude-teams-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir: join(dir, "runtime"), driver: new FakeDriver() });
+  const bridge1 = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+  const backend1 = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge: bridge1 });
+
+  await backend1.spawnTeammate({ name: "worker", prompt: "You are teammate." });
+
+  const bridge2 = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+  const backend2 = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge: bridge2 });
+
+  const teammates = await backend2.listTeammates();
+  assert.equal(teammates.length, 1);
+
+  const message = await backend2.sendMessage("worker", "Need update");
+  assert.match(message.reply, /teammate:\[intercom kind=ask from=team-chat\]/);
+});
+
+test("done-like replies auto-complete tasks", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "claude-teams-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir: join(dir, "runtime"), driver: new FakeDriver() });
+  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+  const backend = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge });
+
+  await backend.spawnTeammate({ name: "worker", prompt: "You are teammate." });
+  const task = await backend.assignTask({ assignee: "worker", title: "Ship it", details: "Finish work" });
+  assert.equal(task.state, "done");
+  assert.match(task.lastReply ?? "", /^DONE:/);
 });
 
 test("task formatter includes title and details", () => {

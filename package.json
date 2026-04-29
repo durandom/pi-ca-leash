@@ -2,7 +2,7 @@
   "name": "pi-claude-code-agent",
   "private": true,
   "version": "0.1.0",
-  "description": "Planning and implementation repo for Claude Code integration with pi, pi-intercom, pi-subagents, and pi-teams",
+  "description": "Planning and implementation repo for Claude Code runtime, intercom bridge, subagents backend, and local teams backend",
   "type": "module",
   "keywords": [
     "pi-package",
@@ -20,7 +20,8 @@
   },
   "scripts": {
     "build": "npm run build --workspaces",
-    "test": "npm run test --workspaces",
+    "test": "npm run test --workspaces && npm run test:extension",
+    "test:extension": "node --test --import tsx ./extensions/**/*.test.ts",
     "smoke": "npm run smoke --workspace @pi-claude-code-agent/runtime",
     "demo:intercom": "npm run demo --workspace @pi-claude-code-agent/intercom-bridge",
     "demo:subagent": "npm run demo --workspace @pi-claude-code-agent/subagents-backend",
@@ -28,10 +29,12 @@
     "plan:check": "echo 'Runtime + intercom bridge + subagents backend + teams backend implemented as local MVP packages'"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*"
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
   },
   "devDependencies": {
     "@types/node": "^24.9.1",
+    "tsx": "^4.20.6",
     "typescript": "^5.9.3"
   }
 }

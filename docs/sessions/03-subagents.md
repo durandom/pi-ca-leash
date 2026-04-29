@@ -1,7 +1,8 @@
 # Session 3 — pi-subagents backend
 
-Status: implemented as host-side backend MVP
+Status: implemented as host-side backend MVP, then extended with rehydration and attention events
 Date: 2026-04-25
+Updated: 2026-04-29
 
 ## What shipped
 
@@ -22,6 +23,8 @@ Contents:
 - runtime-to-run status mapping
 - async + sync run handling
 - run persistence shaped like subagent artifacts
+- restart rehydration from persisted run/runtime state
+- attention events for stale background runs
 - interrupt / stop / result collection API
 - demo CLI harness
 - unit tests with fake runtime driver
@@ -149,9 +152,10 @@ npm run demo --workspace @pi-claude-code-agent/subagents-backend -- "Reply with 
    - If host exits, runtime persistence survives.
    - subagent polling loop does not.
 
-3. Needs-attention/control notifications not implemented.
-   - no inactivity timer
-   - no control channel/event bridge yet
+3. Attention events exist now, but upstream `pi-subagents` control wiring still does not.
+   - stale local background runs emit `attention` into run artifacts
+   - the local extension now surfaces attention in the dashboard and supports ack/snooze for noisy runs
+   - no real upstream control-notification integration has been wired in this repo
 
 4. Clarify TUI not represented yet.
    - backend package assumes fully materialized start input
@@ -184,7 +188,7 @@ Teams still need extra semantics beyond subagent jobs:
 - persistent peer identity across many assignments
 - inbox/message/task lifecycle
 - teammate metadata and task ownership
-- mixed backend team composition
+- teammate-specific UX beyond one-shot run records
 
 ## Next session handoff
 

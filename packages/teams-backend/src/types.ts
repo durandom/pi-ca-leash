@@ -1,4 +1,4 @@
-export type TeammateBackend = "pi" | "claude-code-agent";
+export type TeammateBackend = "claude-code-agent";
 export type TeamTaskState = "todo" | "assigned" | "in_progress" | "done" | "blocked" | "cancelled";
 export type TeammateState = "starting" | "idle" | "busy" | "interrupted" | "stopped" | "errored" | "disconnected";
 

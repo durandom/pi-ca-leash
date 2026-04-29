@@ -7,13 +7,16 @@ import type { SpawnTeammateInput, TeamMessageResult, TeamTask, TeamsBackendOptio
 export class ClaudeCodeTeamsBackend {
   private readonly bridge: ClaudeRuntimeIntercomBridge;
   private readonly storageDir: string;
+  private readonly ready: Promise<void>;
 
   constructor(options: TeamsBackendOptions = {}) {
     this.bridge = options.bridge ?? new ClaudeRuntimeIntercomBridge();
     this.storageDir = resolve(options.storageDir ?? defaultTeamsDir());
+    this.ready = this.restoreTeammates();
   }
 
   async spawnTeammate(input: SpawnTeammateInput): Promise<TeammateRecord> {
+    await this.ready;
     const existing = await readTeammate(this.storageDir, input.name);
     if (existing) {
       throw new Error(`Teammate ${input.name} already exists`);
@@ -30,11 +33,13 @@ export class ClaudeCodeTeamsBackend {
   }
 
   async listTeammates(): Promise<TeammateRecord[]> {
+    await this.ready;
     const teammates = await listTeammates(this.storageDir);
     return teammates.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async teammateStatus(name: string): Promise<TeammateRecord | undefined> {
+    await this.ready;
     const record = await readTeammate(this.storageDir, name);
     if (!record) {
       return undefined;
@@ -49,6 +54,7 @@ export class ClaudeCodeTeamsBackend {
   }
 
   async assignTask(input: { assignee: string; title: string; details: string }): Promise<TeamTask> {
+    await this.ready;
     const teammate = await this.requireTeammate(input.assignee);
     const now = new Date().toISOString();
     const task: TeamTask = {
@@ -67,7 +73,7 @@ export class ClaudeCodeTeamsBackend {
       text: formatTaskAssignment(task),
     });
 
-    task.state = "in_progress";
+    task.state = classifyTaskReply(result.reply);
     task.updatedAt = new Date().toISOString();
     task.lastReply = result.reply;
     await writeTask(this.storageDir, task);
@@ -76,6 +82,7 @@ export class ClaudeCodeTeamsBackend {
   }
 
   async sendMessage(name: string, text: string): Promise<TeamMessageResult> {
+    await this.ready;
     await this.requireTeammate(name);
     const result = await this.bridge.ask(name, {
       from: "team-chat",
@@ -89,6 +96,7 @@ export class ClaudeCodeTeamsBackend {
   }
 
   async markTaskDone(taskId: string, note?: string): Promise<TeamTask> {
+    await this.ready;
     const task = await this.requireTask(taskId);
     task.state = "done";
     task.updatedAt = new Date().toISOString();
@@ -100,16 +108,32 @@ export class ClaudeCodeTeamsBackend {
   }
 
   async listTasks(): Promise<TeamTask[]> {
+    await this.ready;
     const tasks = await listTasks(this.storageDir);
     return tasks.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   async stopTeammate(name: string): Promise<TeammateRecord> {
+    await this.ready;
     const teammate = await this.requireTeammate(name);
     const peer = await this.bridge.stop(name);
     const next = this.recordFromPeer(name, teammate.sessionId, teammate.cwd, teammate.model, mapState(peer.state), teammate.createdAt, peer.updatedAt, peer.lastActivityAt);
     await writeTeammate(this.storageDir, next);
     return next;
+  }
+
+  private async restoreTeammates(): Promise<void> {
+    const teammates = await listTeammates(this.storageDir);
+    for (const teammate of teammates) {
+      if (!teammate.sessionId) {
+        continue;
+      }
+      try {
+        await this.bridge.attachPeer({ name: teammate.name, sessionId: teammate.sessionId });
+      } catch {
+        // Ignore stale bridge/session records.
+      }
+    }
   }
 
   private async requireTeammate(name: string): Promise<TeammateRecord> {
@@ -156,6 +180,17 @@ function formatTaskAssignment(task: TeamTask): string {
   return [`Task: ${task.title}`, task.details, "Reply with progress and intended next step."].join("\n\n");
 }
 
+function classifyTaskReply(reply: string): TeamTask["state"] {
+  const normalized = reply.trim().toLowerCase();
+  if (normalized.startsWith("done:") || normalized.startsWith("completed:") || normalized.includes("task complete")) {
+    return "done";
+  }
+  if (normalized.startsWith("blocked:") || normalized.includes("blocked")) {
+    return "blocked";
+  }
+  return "in_progress";
+}
+
 function mapState(state: import("@pi-claude-code-agent/intercom-bridge").BridgeState): TeammateState {
   switch (state) {
     case "starting":
@@ -178,4 +213,4 @@ function mapState(state: import("@pi-claude-code-agent/intercom-bridge").BridgeS
   }
 }
 
-export { formatTaskAssignment, mapState };
+export { classifyTaskReply, formatTaskAssignment, mapState };

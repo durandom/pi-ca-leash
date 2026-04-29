@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import {
   ClaudeCodeRuntime,
   type RuntimeEvent,
@@ -5,12 +6,20 @@ import {
   type RuntimeSessionId,
   type RuntimeStatus,
 } from "@pi-claude-code-agent/runtime";
+import {
+  defaultBridgeStorageDir,
+  readBridgeRegistry,
+  writeBridgeRegistry,
+} from "./persistence.js";
 import type {
   AskResult,
   AttachPeerInput,
   BridgeOptions,
   BridgePeer,
   BridgeState,
+  BridgeTransport,
+  BridgeTransportIncomingMessage,
+  BridgeTransportStatus,
   IntercomInboundMessage,
   LaunchPeerInput,
 } from "./types.js";
@@ -27,12 +36,16 @@ const BRIDGE_SYSTEM_PROMPT = [
 
 export class ClaudeRuntimeIntercomBridge {
   private readonly runtime: ClaudeCodeRuntime;
+  private readonly storageDir: string;
+  private transport?: BridgeTransport;
   private readonly pollIntervalMs: number;
   private readonly askTimeoutMs: number;
   private readonly peers = new Map<string, BridgePeer>();
 
   constructor(options: BridgeOptions = {}) {
     this.runtime = options.runtime ?? new ClaudeCodeRuntime();
+    this.storageDir = resolve(options.storageDir ?? defaultBridgeStorageDir());
+    this.transport = options.transport;
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.askTimeoutMs = options.askTimeoutMs ?? DEFAULT_ASK_TIMEOUT_MS;
   }
@@ -52,6 +65,8 @@ export class ClaudeRuntimeIntercomBridge {
     });
     const peer = this.peerFromStatus(input.name, status, "starting");
     this.peers.set(peer.name, peer);
+    await this.rememberPeer(peer.name, peer.sessionId);
+    await this.registerTransportPeer(peer.name);
     await this.waitForTerminalState(peer.sessionId);
     return this.syncPeerFromRuntime(peer.name);
   }
@@ -64,6 +79,8 @@ export class ClaudeRuntimeIntercomBridge {
     }
     const peer = this.peerFromStatus(input.name, status, mapRuntimeState(status.state, true));
     this.peers.set(peer.name, peer);
+    await this.rememberPeer(peer.name, peer.sessionId);
+    await this.registerTransportPeer(peer.name);
     return peer;
   }
 
@@ -96,6 +113,8 @@ export class ClaudeRuntimeIntercomBridge {
   async stop(name: string): Promise<BridgePeer> {
     const peer = this.requirePeer(name);
     await this.runtime.stop(peer.sessionId);
+    await this.forgetPeer(name);
+    await this.unregisterTransportPeer(name);
     return this.syncPeerFromRuntime(name);
   }
 
@@ -108,7 +127,64 @@ export class ClaudeRuntimeIntercomBridge {
       lastActivityAt: new Date().toISOString(),
     };
     this.peers.set(name, next);
+    await this.forgetPeer(name);
+    await this.unregisterTransportPeer(name);
     return next;
+  }
+
+  async setTransport(transport?: BridgeTransport): Promise<void> {
+    if (this.transport === transport) {
+      return;
+    }
+    const previous = this.transport;
+    this.transport = transport;
+    await previous?.close?.();
+    if (!transport) {
+      return;
+    }
+    for (const peer of this.peers.values()) {
+      await this.registerTransportPeer(peer.name);
+      await transport.updatePeer(peer);
+    }
+  }
+
+  async restorePeers(): Promise<BridgePeer[]> {
+    const registry = await readBridgeRegistry(this.storageDir);
+    const restored: BridgePeer[] = [];
+    const survivors: Array<{ name: string; sessionId: string }> = [];
+
+    for (const record of registry.peers) {
+      if (this.peers.has(record.name)) {
+        survivors.push(record);
+        restored.push(this.peers.get(record.name)!);
+        continue;
+      }
+      try {
+        const peer = await this.attachPeer(record);
+        survivors.push({ name: peer.name, sessionId: peer.sessionId });
+        restored.push(peer);
+      } catch {
+        // Drop stale registry entries.
+      }
+    }
+
+    await writeBridgeRegistry(this.storageDir, { peers: survivors });
+    return restored.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async transportStatus(): Promise<BridgeTransportStatus | undefined> {
+    return this.transport?.getStatus?.();
+  }
+
+  hasTransport(): boolean {
+    return Boolean(this.transport);
+  }
+
+  async close(): Promise<void> {
+    for (const name of [...this.peers.keys()]) {
+      await this.unregisterTransportPeer(name);
+    }
+    await this.transport?.close?.();
   }
 
   private async deliver(name: string, inbound: IntercomInboundMessage): Promise<AskResult> {
@@ -170,6 +246,7 @@ export class ClaudeRuntimeIntercomBridge {
     }
     const next = this.peerFromStatus(name, status, mapRuntimeState(status.state, true));
     this.peers.set(name, next);
+    await this.transport?.updatePeer(next);
     return next;
   }
 
@@ -184,6 +261,61 @@ export class ClaudeRuntimeIntercomBridge {
       updatedAt: status.updatedAt,
       lastActivityAt: status.lastActivityAt,
     };
+  }
+
+  private async registerTransportPeer(name: string): Promise<void> {
+    if (!this.transport) {
+      return;
+    }
+    const peer = this.requirePeer(name);
+    await this.transport.registerPeer(peer, async (message) => {
+      await this.handleTransportMessage(name, message);
+    });
+  }
+
+  private async unregisterTransportPeer(name: string): Promise<void> {
+    await this.transport?.unregisterPeer(name);
+  }
+
+  private async handleTransportMessage(name: string, message: BridgeTransportIncomingMessage): Promise<void> {
+    const inbound: IntercomInboundMessage = {
+      kind: message.replyTo ? "reply" : message.expectsReply ? "ask" : "send",
+      from: message.from.name ?? message.from.id,
+      text: formatTransportInboundText(message),
+      replyTo: message.replyTo,
+    };
+
+    if (message.expectsReply) {
+      try {
+        const result = await this.deliver(name, inbound);
+        await this.transport?.sendFromPeer(name, message.from.id, {
+          text: result.reply,
+          replyTo: message.id,
+        });
+      } catch (error) {
+        await this.transport?.sendFromPeer(name, message.from.id, {
+          text: `Bridge error: ${error instanceof Error ? error.message : String(error)}`,
+          replyTo: message.id,
+        });
+      }
+      return;
+    }
+
+    await this.deliver(name, inbound);
+  }
+
+  private async rememberPeer(name: string, sessionId: string): Promise<void> {
+    const registry = await readBridgeRegistry(this.storageDir);
+    const peers = registry.peers.filter((peer) => peer.name !== name);
+    peers.push({ name, sessionId });
+    await writeBridgeRegistry(this.storageDir, { peers: peers.sort((a, b) => a.name.localeCompare(b.name)) });
+  }
+
+  private async forgetPeer(name: string): Promise<void> {
+    const registry = await readBridgeRegistry(this.storageDir);
+    await writeBridgeRegistry(this.storageDir, {
+      peers: registry.peers.filter((peer) => peer.name !== name),
+    });
   }
 
   private requirePeer(name: string): BridgePeer {
@@ -267,4 +399,15 @@ async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export { BRIDGE_SYSTEM_PROMPT, extractReplyText, formatInboundMessage, mapRuntimeState };
+function formatTransportInboundText(message: BridgeTransportIncomingMessage): string {
+  const attachmentText = (message.attachments ?? []).map((attachment) => {
+    if (attachment.language) {
+      return [`---`, `Attachment: ${attachment.name}`, `~~~${attachment.language}`, attachment.content, `~~~`].join("\n");
+    }
+    return [`---`, `Attachment: ${attachment.name}`, attachment.content].join("\n");
+  }).join("\n\n");
+
+  return attachmentText ? `${message.text}\n\n${attachmentText}` : message.text;
+}
+
+export { BRIDGE_SYSTEM_PROMPT, extractReplyText, formatInboundMessage, formatTransportInboundText, mapRuntimeState };

@@ -1,5 +1,7 @@
 # Implementation Plan: pi-claude-code-agent
 
+**Status (2026-04-29):** Runtime, intercom bridge, subagent backend, and teams backend all exist in this repo. This document is now partly historical. Use it as architecture intent plus honest gap tracking, not as a pure future plan.
+
 ## Goal
 
 Build a Claude Code-backed execution stack that integrates cleanly with pi's existing orchestration primitives without pretending Claude Code is a normal stateless model provider.
@@ -11,7 +13,7 @@ Implement in this order:
 1. **Runtime package**: extract/adapt a reusable Claude Code session runtime
 2. **Intercom bridge**: make runtime sessions named and messageable
 3. **pi-subagents backend**: reuse subagent TUI, async, status, and control for job-oriented delegation
-4. **pi-teams backend**: provide persistent teammate mode with task-board and messaging semantics
+4. **teams backend**: provide persistent teammate mode with task-board and messaging semantics
 
 ---
 
@@ -60,7 +62,7 @@ claude-code-agent-runtime
 adapters/
   ├─ intercom bridge
   ├─ pi-subagents backend
-  └─ pi-teams backend
+  └─ teams backend
 ```
 
 This prevents duplicate protocol translations and keeps integration-specific logic out of the runtime core.
@@ -88,7 +90,7 @@ The intercom and teams integrations only make sense if a Claude worker can survi
 ### 4. Support job mode and teammate mode separately
 Two distinct usage patterns exist:
 - **job mode**: run task, monitor progress, return result (`pi-subagents`)
-- **teammate mode**: keep agent alive and keep messaging it (`pi-teams`, `pi-intercom`)
+- **teammate mode**: keep agent alive and keep messaging it (teams backend, `pi-intercom`)
 
 Do not collapse these into one muddy API.
 
@@ -306,7 +308,7 @@ At end of Session 2, one Claude runtime session can behave like a messageable pe
 ### Out of scope
 - subagent TUI integration
 - task-board integration
-- pi-teams teammate spawning
+- external team-product integration
 
 ## Key design decision
 
@@ -339,7 +341,7 @@ Need mapping between:
 - runtime session id
 - intercom-visible peer name
 - cwd
-n- model
+- model
 - bridge process identity
 
 Need stable naming rules and collision handling.
@@ -579,7 +581,7 @@ Before ending Session 3, next session must have:
 
 ---
 
-# Session 4 — pi-teams backend
+# Session 4 — teams backend
 
 ## Objective
 
@@ -596,7 +598,7 @@ At end of Session 4, a team can include Claude-backed long-lived workers that:
 ## Scope
 
 ### In scope
-- teammate backend abstraction in `pi-teams`
+- teammate backend abstraction in this repo
 - launch/manage Claude-backed teammate workers
 - inbox/task/message bridge
 - persistent worker lifecycle
@@ -607,13 +609,13 @@ At end of Session 4, a team can include Claude-backed long-lived workers that:
 
 ## Key idea
 
-`pi-teams` is the right layer for long-lived collaborative workers.
+This repo's teams backend is the right layer for long-lived collaborative workers.
 Claude runtime sessions are naturally compatible with teammate persistence once messaging is bridged.
 
 ## Detailed work items
 
 ### 1. Add teammate backend abstraction
-Current `pi-teams` likely assumes spawned teammates are pi sessions.
+Current teams backend should assume spawned teammates are runtime-backed workers.
 Need abstraction for:
 - spawn
 - stop
@@ -622,7 +624,6 @@ Need abstraction for:
 - maybe attach logs/pane info
 
 Implement:
-- existing pi teammate backend
 - `claude-code-agent` teammate backend
 
 ### 2. Decide worker host form
@@ -680,34 +681,33 @@ Must support at least:
 - teammate asks clarification
 - teammate reports completion
 
-### 8. Stretch: mixed teams
-Best outcome is mixed team support:
-- some teammates are normal pi sessions
-- some are Claude runtime workers
-
-That gives practical incremental adoption.
+### 8. Stretch: richer team UX
+Best outcome later:
+- better task-board UX
+- optional direct human/team inbox views
+- optional non-Claude teammate types only if a concrete need appears
 
 ## Deliverables
-- `pi-teams` backend abstraction
+- teams backend abstraction
 - Claude teammate backend
 - teammate prompt/message contract docs
 - demo workflow script/docs
 
 ## Acceptance criteria
-- can spawn long-lived Claude-backed teammate from `pi-teams`
+- can spawn long-lived Claude-backed teammate from this repo's teams backend
 - teammate can receive multiple messages/tasks over time
 - teammate can participate in task-board and direct-messaging flow
 - teammate shutdown cleans up runtime and registration cleanly
 
 ## Risks
-- `pi-teams` may depend heavily on teammate being a full pi session
 - task/inbox semantics may require a larger bridge layer than expected
 - pane/window UX may expose runtime host details awkwardly
+- richer board semantics may be more product work than runtime work
 
 ## Mitigations
-- start with mixed-team support, not full replacement
 - keep teammate backend protocol minimal
 - use wrapper process for observability and simpler ops
+- resist adding alternate teammate types without a concrete need
 
 ---
 
@@ -717,19 +717,28 @@ Every session should:
 - create/claim explicit work items if beads is functional in the target repo
 - leave a written handoff document for next session
 - avoid silently changing core contracts without updating docs
-- preserve backward compatibility where touching `pi-subagents` and `pi-teams`
+- preserve backward compatibility where touching `pi-subagents`
 
 ---
 
-## Global open questions
+## Resolved decisions and remaining gaps
 
-These should be resolved explicitly, not implicitly during coding:
+Resolved in this repo:
 
-1. Should intercom bridging be done through a reusable broker client or a pi-hosted proxy first?
-2. Is `fork` unsupported, emulated, or partially supported for runtime-backed subagents?
-3. Should runtime event stream expose tool activity generically or preserve raw driver metadata only?
-4. Will `pi-teams` use direct runtime bridges or route everything through intercom semantics?
-5. Should mixed backends be first-class from day one in both `pi-subagents` and `pi-teams`?
+1. Intercom bridging started as host-side proxy logic, then gained an optional live `pi-intercom` broker transport adapter.
+2. The local extension now surfaces broker disconnect/reconnect, auto-refreshes the dashboard, and can rebind peers after broker return.
+3. `fork` is still explicitly unsupported for the local runtime-backed subagent backend in this repo.
+4. Runtime event stream exposes normalized generic events while preserving raw driver payloads.
+5. Team-style collaboration here routes through runtime bridge semantics and intercom-style messaging.
+6. Mixed-backend team orchestration is no longer a goal in this repo unless a concrete need appears.
+
+Remaining gaps:
+
+1. No proven upstream `pi-subagents` package wiring from this repo into the real installed extension.
+2. Late broker availability is handled in the local extension via retry/rebind, but broker spawning is still owned by `pi-intercom`.
+3. Attention ack/snooze is currently local extension state, not a shared persisted control protocol.
+4. Cross-process resurrection is still limited: persisted state survives, active in-flight process control does not.
+5. Teams backend remains local/package-level rather than integrated into any broader external team product.
 
 ---
 

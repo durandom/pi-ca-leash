@@ -1,7 +1,8 @@
 # Session 2 — Intercom bridge
 
-Status: implemented
+Status: implemented, then extended with persisted registry and optional live `pi-intercom` transport
 Date: 2026-04-25
+Updated: 2026-04-29
 
 ## What shipped
 
@@ -18,8 +19,11 @@ Implemented package: `@pi-claude-code-agent/intercom-bridge`
 Contents:
 - `ClaudeRuntimeIntercomBridge` orchestration class
 - peer launch/attach/list/status/stop/disconnect API
+- persisted peer registry + `restorePeers()`
 - `send` / `ask` / `reply` message semantics
 - idle-cycle reply extraction
+- optional live `pi-intercom` broker transport via `PiIntercomTransport`
+- extension-side broker disconnect/reconnect notices and transport rebind logic
 - bridge prompt contract
 - demo CLI harness
 - unit tests with fake runtime driver
@@ -159,25 +163,22 @@ Flow:
 
 ## Known limits / unresolved questions
 
-1. No real `pi-intercom` transport binding yet.
-   - This package is host-side bridge logic only.
-   - Actual broker registration/proxy layer still needed in pi integration.
+1. Live `pi-intercom` transport is now optional, not guaranteed.
+   - The bridge can bind to the real broker when reachable.
+   - If the broker is absent, runtime-backed peers still work locally without live intercom presence.
+   - The local extension now emits explicit disconnect/reconnect notices and rebinds peers when the broker returns.
 
-2. Peer registry is in-memory only.
-   - Runtime session persistence exists.
-   - Bridge peer-name registry does not survive bridge process restart yet.
-
-3. Busy handling is strict.
+2. Busy handling is strict.
    - concurrent inbound messages are rejected
    - no queueing yet
 
-4. Reply extraction is text-first.
+3. Reply extraction is text-first.
    - latest assistant text wins
    - falls back to `result.summary`
    - tool-only responses may need richer extraction later
 
-5. Disconnect is bridge-local.
-   - it does not unregister from real intercom because no transport exists yet
+4. No inbound queueing yet.
+   - one busy worker can still reject concurrent messages instead of buffering them
 
 ## Known gaps vs Session 3 needs
 
@@ -215,5 +216,5 @@ Session 3 can assume:
 - transport-neutral message envelope exists
 
 Main caution for Session 3:
-- this bridge is not real intercom transport yet
-- subagents should integrate against runtime first, not depend on bridge registry persistence
+- transport binding now exists, but should stay optional
+- subagents should integrate against runtime first, not depend on live broker availability

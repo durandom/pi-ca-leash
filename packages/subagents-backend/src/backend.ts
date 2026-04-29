@@ -27,6 +27,7 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 100;
+const DEFAULT_ATTENTION_POLL_INTERVAL_MS = 1_000;
 
 export class ClaudeCodeSubagentBackend implements SubagentBackend {
   readonly runner = "claude-code-agent" as const;
@@ -35,22 +36,38 @@ export class ClaudeCodeSubagentBackend implements SubagentBackend {
   private readonly storageDir: string;
   private readonly pollIntervalMs: number;
   private readonly completionTimeoutMs: number;
+  private readonly needsAttentionAfterMs?: number;
+  private readonly attentionPollIntervalMs: number;
   private readonly sessionToRunId = new Map<string, string>();
+  private readonly attentionRaised = new Set<string>();
+  private readonly ready: Promise<void>;
+  private attentionTimer?: NodeJS.Timeout;
 
   constructor(options: RuntimeSubagentBackendOptions = {}) {
     this.runtime = options.runtime ?? new ClaudeCodeRuntime();
     this.storageDir = resolve(options.storageDir ?? defaultRunsDir());
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
     this.completionTimeoutMs = options.completionTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.needsAttentionAfterMs = options.needsAttentionAfterMs;
+    this.attentionPollIntervalMs = options.attentionPollIntervalMs ?? DEFAULT_ATTENTION_POLL_INTERVAL_MS;
     this.runtime.subscribe((event) => {
       const runId = this.sessionToRunId.get(event.sessionId);
       if (runId) {
+        this.attentionRaised.delete(runId);
         void appendRunEvent(this.storageDir, runId, event);
       }
     });
+    this.ready = this.rehydrateRuns();
+    if (this.needsAttentionAfterMs && this.needsAttentionAfterMs > 0) {
+      this.attentionTimer = setInterval(() => {
+        void this.scanAttention();
+      }, this.attentionPollIntervalMs);
+      this.attentionTimer.unref?.();
+    }
   }
 
   async startRun(input: StartRunInput): Promise<SubagentRunRecord> {
+    await this.ready;
     if ((input.agent.runner ?? this.runner) !== this.runner) {
       throw new Error(`Unsupported runner ${input.agent.runner}`);
     }
@@ -107,6 +124,7 @@ export class ClaudeCodeSubagentBackend implements SubagentBackend {
   }
 
   async statusRun(runId: string): Promise<SubagentRunRecord | undefined> {
+    await this.ready;
     const record = await readRunState(this.storageDir, runId);
     if (!record?.sessionId) {
       return record;
@@ -116,15 +134,18 @@ export class ClaudeCodeSubagentBackend implements SubagentBackend {
   }
 
   async listRuns(): Promise<SubagentRunRecord[]> {
+    await this.ready;
     const runs = await listRunStates(this.storageDir);
     return runs.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   async eventsRun(runId: string, cursor = 0) {
+    await this.ready;
     return readRunEvents(this.storageDir, runId, cursor);
   }
 
   async interruptRun(runId: string): Promise<SubagentRunRecord> {
+    await this.ready;
     const record = await this.requireRun(runId);
     if (!record.sessionId) {
       throw new Error(`Run ${runId} has no runtime session`);
@@ -135,6 +156,7 @@ export class ClaudeCodeSubagentBackend implements SubagentBackend {
   }
 
   async stopRun(runId: string): Promise<SubagentRunRecord> {
+    await this.ready;
     const record = await this.requireRun(runId);
     if (!record.sessionId) {
       throw new Error(`Run ${runId} has no runtime session`);
@@ -144,6 +166,7 @@ export class ClaudeCodeSubagentBackend implements SubagentBackend {
   }
 
   async collectResult(runId: string): Promise<RunResult | undefined> {
+    await this.ready;
     const persisted = await readRunResult(this.storageDir, runId);
     if (persisted) {
       return persisted;
@@ -225,6 +248,67 @@ export class ClaudeCodeSubagentBackend implements SubagentBackend {
     };
     await writeRunResult(this.storageDir, runId, result);
     return result;
+  }
+
+  private async rehydrateRuns(): Promise<void> {
+    const runs = await listRunStates(this.storageDir);
+    await Promise.all(runs.map(async (run) => {
+      if (run.sessionId) {
+        this.sessionToRunId.set(run.sessionId, run.runId);
+      }
+      if (!run.sessionId || !["queued", "starting", "running", "idle"].includes(run.state)) {
+        return;
+      }
+      const status = await this.runtime.status(run.sessionId);
+      if (status) {
+        await this.syncRun(run.runId, status);
+      }
+    }));
+  }
+
+  private async scanAttention(): Promise<void> {
+    if (!this.needsAttentionAfterMs || this.needsAttentionAfterMs <= 0) {
+      return;
+    }
+    const now = Date.now();
+    const runs = await listRunStates(this.storageDir);
+    for (const run of runs) {
+      if (!run.sessionId || !["queued", "starting", "running"].includes(run.state)) {
+        this.attentionRaised.delete(run.runId);
+        continue;
+      }
+      const status = await this.runtime.status(run.sessionId);
+      if (!status) {
+        continue;
+      }
+      if (isTerminal(status.state)) {
+        this.attentionRaised.delete(run.runId);
+        await this.syncRun(run.runId, status);
+        continue;
+      }
+      const lastActivityAt = Date.parse(status.lastActivityAt || run.lastActivityAt);
+      if (Number.isNaN(lastActivityAt) || now - lastActivityAt < this.needsAttentionAfterMs) {
+        this.attentionRaised.delete(run.runId);
+        continue;
+      }
+      if (this.attentionRaised.has(run.runId)) {
+        continue;
+      }
+      this.attentionRaised.add(run.runId);
+      await appendRunEvent(this.storageDir, run.runId, {
+        id: randomUUID(),
+        sessionId: run.sessionId,
+        sequence: now,
+        timestamp: new Date(now).toISOString(),
+        type: "attention",
+        reason: `No runtime activity for ${now - lastActivityAt}ms`,
+      });
+      await writeRunState(this.storageDir, {
+        ...run,
+        note: `Needs attention: idle for ${now - lastActivityAt}ms`,
+        updatedAt: new Date(now).toISOString(),
+      });
+    }
   }
 
   private async requireRun(runId: string): Promise<SubagentRunRecord> {

@@ -1,7 +1,8 @@
-# Session 4 — pi-teams backend
+# Session 4 — teams backend
 
-Status: implemented as host-side teammate MVP
+Status: implemented as host-side teammate MVP, then extended with restore + task auto-classification
 Date: 2026-04-25
+Updated: 2026-04-29
 
 ## What shipped
 
@@ -22,6 +23,8 @@ Contents:
 - task assignment flow
 - direct team-message flow
 - teammate + task persistence
+- teammate restore/reattach on backend restart
+- task auto-classification for `DONE:` / `BLOCKED:` style replies
 - demo CLI harness
 - unit tests with fake runtime driver
 
@@ -38,7 +41,7 @@ Why:
 
 Truth:
 - no terminal pane/window observability yet
-- wrapper-process UX still future work if upstream `pi-teams` wants panes
+- wrapper-process UX still future work if pane/window observability becomes necessary
 
 ### 2. Task / inbox bridge contract
 
@@ -52,14 +55,14 @@ Current mapping:
 
 This keeps teammate mode on top of already-defined long-lived messaging semantics.
 
-### 3. Mixed backend support level
+### 3. Scope tightening
 
-Decision: **contract-ready, not upstream-integrated**.
+Decision: **local teams backend only**.
 
 Truth:
-- this package only implements Claude-backed teammate backend now
-- type surface keeps backend identity field for future mixed teams
-- real mixed backend support still needs upstream `pi-teams` abstraction work
+- this package implements Claude-backed teammate behavior directly
+- no external teams package integration is planned here
+- mixed-backend orchestration is out of scope unless a real need appears later
 
 ## Public API summary
 
@@ -132,13 +135,13 @@ npm run demo --workspace @pi-claude-code-agent/teams-backend -- "You are persist
 
 ## Known limits / unresolved questions
 
-1. No real upstream `pi-teams` integration yet.
-   - This package proves teammate backend behavior locally.
-   - Actual task-board/inbox UI integration still needs upstream wiring.
+1. No external teams package integration is planned.
+   - This package is the local persistent teammate implementation.
+   - If richer task-board/inbox UI is wanted later, it should be built here or against a concrete package that actually exists.
 
-2. Task state transitions are simplified.
-   - `assignTask` moves task to `in_progress` after first reply.
-   - no autonomous completion detection yet
+2. Task state transitions are still simplified.
+   - `assignTask` now classifies obvious `DONE:` / `BLOCKED:` style replies
+   - there is still no richer autonomous task lifecycle or board protocol
 
 3. No inbox polling tool contract.
    - runtime does not get native task-board tools
@@ -147,9 +150,9 @@ npm run demo --workspace @pi-claude-code-agent/teams-backend -- "You are persist
 4. No pane/window host.
    - headless only
 
-5. No teammate recovery after bridge restart.
-   - runtime session may still exist
-   - teammate registry persistence exists, but live bridge reattach flow is not automated
+5. Teammate recovery after backend restart now exists.
+   - persisted teammate records reattach to persisted bridge/runtime sessions on startup
+   - richer failure recovery across hard process loss is still limited
 
 ## Example usage
 
@@ -173,10 +176,9 @@ await backend.stopTeammate("researcher");
 
 ## Remaining truth
 
-⚠️ This is persistent teammate semantics in local package form, not real `pi-teams` integration.
+⚠️ This is a local persistent teammate backend. That is now the intended scope.
 
-Biggest missing upstream work:
-- real teammate backend abstraction in `pi-teams`
-- UI/task-board wiring
-- recovery / reconnect semantics
-- mixed pi + Claude teammates in one live team
+Biggest remaining work in-scope:
+- richer UI/task-board wiring
+- stronger recovery / reconnect semantics
+- optional pane/window observability if needed
