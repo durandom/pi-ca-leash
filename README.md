@@ -21,6 +21,15 @@ Not claimed here:
 - real forked Claude session semantics
 - host-independent end-to-end extension smoke coverage
 
+## Documentation map
+
+Start here:
+- `README.md` — what this repo is and how to try it
+- `ARCHITECTURE.md` — how the pieces fit together
+- `KNOWN_LIMITS.md` — explicit constraints and non-goals
+- `CHANGELOG.md` — notable changes over time
+- `AGENTS.md` — guidance for agents working inside this repo
+
 ## Repository layout
 
 ```text
@@ -219,6 +228,9 @@ Validated now:
 
 ## Known limits
 
+See `KNOWN_LIMITS.md` for the blunt version.
+
+Most important limits:
 - Full extension-host smoke testing still depends on a real pi installation and host runtime.
 - Intercom broker availability is optional; local runtime-backed peers still work without live broker presence.
 - `runner=claude-code-agent` does not support real `fork` semantics.
