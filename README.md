@@ -1,48 +1,27 @@
 # pi-claude-code-agent
 
-Runtime-first integration repo for bringing Claude Code into pi without pretending Claude Code is a stateless model provider.
+Runtime-first Claude Code integration for pi.
 
-## Implemented now
+This repo does **not** pretend Claude Code is a stateless model provider. It treats Claude Code as a long-lived agent runtime, then builds local adapters on top of that runtime.
 
-Session 1 runtime foundation lives in `packages/runtime`.
-Session 2 intercom bridge lives in `packages/intercom-bridge`.
-Session 3 subagent backend lives in `packages/subagents-backend`.
-Session 4 teammate backend lives in `packages/teams-backend`.
+## Status
 
-Runtime provides:
-- Claude-backed session start/resume
-- normalized runtime events
-- disk persistence
-- interrupt/stop lifecycle controls
-- smoke CLI harness
+This repository is a **working local MVP**.
 
-Intercom bridge provides:
-- named runtime-backed peers
-- `send` / `ask` / `reply` orchestration
-- idle-cycle reply extraction
-- persisted peer registry with restart restore
-- optional live `pi-intercom` broker transport when broker is reachable
-- extension-side disconnect/reconnect notices and late rebinds
-- demo CLI harness
+Implemented here:
+- Claude Code runtime package
+- intercom-style bridge package
+- subagent backend package
+- local teams backend package
+- pi extension with dashboard, intercom monitoring, and attention controls
 
-Subagent backend provides:
-- `runner: claude-code-agent` execution backend
-- sync/async run lifecycle
-- run artifact persistence
-- startup rehydration from persisted runtime/run state
-- attention events for stale background runs
-- extension-side attention list / ack / snooze UX
-- persisted local attention ack/snooze state across pi restarts
-- result collection and control APIs
+Not claimed here:
+- full upstream product integration with real `pi-subagents`
+- any external `pi-teams` package integration
+- real forked Claude session semantics
+- host-independent end-to-end extension smoke coverage
 
-Teams backend provides:
-- persistent Claude-backed teammate spawn/message/stop flows
-- teammate restore/reattach after backend restart
-- task auto-classification (`DONE:` / `BLOCKED:` style replies)
-- teammate/task persistence
-- demo CLI harness
-
-## Repository shape
+## Repository layout
 
 ```text
 packages/
@@ -50,24 +29,90 @@ packages/
   intercom-bridge/
   subagents-backend/
   teams-backend/
-docs/
-  IMPLEMENTATION_PLAN.md
-  sessions/
+extensions/
+  index.ts
 ```
 
-## Useful commands
+## Package overview
+
+### `@pi-claude-code-agent/runtime`
+Provides:
+- Claude-backed session start/resume
+- normalized runtime events
+- persisted session state and transcript
+- interrupt/stop lifecycle controls
+
+### `@pi-claude-code-agent/intercom-bridge`
+Provides:
+- named runtime-backed peers
+- `send` / `ask` / `reply` behavior
+- idle-cycle reply extraction
+- persisted peer registry with restart restore
+- optional live `pi-intercom` broker transport when reachable
+
+### `@pi-claude-code-agent/subagents-backend`
+Provides:
+- `runner: claude-code-agent`
+- sync/async run lifecycle
+- persisted run artifacts
+- restart rehydration
+- attention events for stale background runs
+
+Truth:
+- `context: fork` is rejected
+- this is local backend logic, not real upstream `pi-subagents` wiring
+
+### `@pi-claude-code-agent/teams-backend`
+Provides:
+- persistent Claude-backed teammates
+- teammate restore/reattach after restart
+- task assignment and direct messaging
+- simple task auto-classification from `DONE:` / `BLOCKED:` style replies
+
+Truth:
+- this is a **local teams backend only**
+- no external `pi-teams` integration is planned in this repo
+
+## Extension features
+
+The pi extension in `extensions/index.ts` currently adds:
+- status line and dashboard widget
+- background dashboard refresh every 5s
+- intercom disconnect/reconnect notices
+- late transport rebind when broker becomes reachable again
+- attention notifications for noisy/stale background runs
+- attention list / ack / snooze commands
+- persisted local attention state across pi restarts
+
+Attention state is stored at:
+
+```text
+.pi-claude-code-agent/extension/attention-ledger.json
+```
+
+## Requirements
+
+You need:
+- Node.js
+- npm
+- a working Claude Code environment for runtime-backed execution
+- a real pi installation to load the extension
+
+Peer dependencies expected from pi host environment:
+- `@mariozechner/pi-coding-agent`
+- `@mariozechner/pi-tui`
+
+## Install
 
 ```bash
 npm install
 npm test
 npm run build
-npm run smoke -- "Reply with exactly: smoke-ok"
-npm run demo:intercom -- "You are demo worker. Reply briefly."
-npm run demo:subagent -- "Reply with exactly: subagent-ok"
-npm run demo:teams -- "You are persistent teammate. Reply briefly."
 ```
 
-## Install into pi from this directory
+## Install into pi
+
+From this repository root:
 
 ```bash
 npm install
@@ -75,18 +120,42 @@ npm run build
 pi install /absolute/path/to/pi-claude-code-agent
 ```
 
-This package now exposes a pi extension from `extensions/index.ts`.
+## 5-minute quickstart
 
-The extension currently adds:
-- live dashboard widget + status line
-- background dashboard refresh every 5s
-- explicit intercom disconnect/reconnect notices
-- attention notifications plus ack/snooze controls for noisy runs
-- persisted local attention state in `.pi-claude-code-agent/extension/attention-ledger.json`
+After installing into pi, start pi in this repo and try these.
 
-## Extension commands
+### 1. Start a named peer
 
-After install, start pi in this repo and use:
+```text
+/claude-peer-start worker1 | You are a brief worker. Reply briefly.
+/claude-peer-ask worker1 | Reply with exactly: peer-ok
+/claude-peer-list
+```
+
+### 2. Run a subagent job
+
+```text
+/claude-subagent-run Investigate this repository and reply with exactly: subagent-ok
+/claude-subagent-list
+```
+
+### 3. Spawn a teammate
+
+```text
+/claude-team-spawn researcher | You are a persistent teammate. Reply briefly.
+/claude-team-task researcher | Investigate flakes | Look at failing tests and propose next step.
+/claude-team-list
+```
+
+### 4. Attention controls
+
+```text
+/claude-attention-list
+/claude-attention-ack <runId-prefix>
+/claude-attention-snooze <runId-prefix> 15
+```
+
+## Command reference
 
 ```text
 /claude-peer-start <name> | <prompt>
@@ -110,31 +179,52 @@ After install, start pi in this repo and use:
 /claude-runtime-list
 ```
 
-State is persisted under:
+## Useful workspace commands
+
+```bash
+npm test
+npm run build
+npm run smoke -- "Reply with exactly: smoke-ok"
+npm run demo:intercom -- "You are demo worker. Reply briefly."
+npm run demo:subagent -- "Reply with exactly: subagent-ok"
+npm run demo:teams -- "You are persistent teammate. Reply briefly."
+```
+
+## Persistence
+
+Repository-local state is written under:
 
 ```text
 .pi-claude-code-agent/
 ```
 
-## Current roadmap
+Important subpaths:
 
-1. `@pi-claude-code-agent/runtime` — implemented
-2. `@pi-claude-code-agent/intercom-bridge` — implemented, with persisted registry and optional live `pi-intercom` transport
-3. `@pi-claude-code-agent/subagents-backend` — implemented, with restart rehydration and attention events
-4. `@pi-claude-code-agent/teams-backend` — implemented, with teammate restore and task auto-classification
+```text
+.pi-claude-code-agent/
+  runtime/
+  bridge/
+  subagents/
+  teams/
+  extension/
+```
 
-Extension test coverage now lives in:
-- `extensions/support.test.ts` for dashboard/attention/intercom monitor helpers
-- `extensions/persistence.test.ts` for persisted attention state round-trip/sanitization
+## Testing status
 
-Environment-dependent truth:
-- package/workspace tests are green
-- extension helper/state logic is tested directly
-- full extension host loading still depends on a real pi installation providing peer packages and host runtime
+Validated now:
+- `npm test` passes
+- `npm run build` passes
+- package-level behavior is covered by workspace tests
+- extension helper/state logic is covered by direct tests in `extensions/*.test.ts`
 
-See:
-- `docs/IMPLEMENTATION_PLAN.md`
-- `docs/sessions/01-runtime.md`
-- `docs/sessions/02-intercom.md`
-- `docs/sessions/03-subagents.md`
-- `docs/sessions/04-teams.md`
+## Known limits
+
+- Full extension-host smoke testing still depends on a real pi installation and host runtime.
+- Intercom broker availability is optional; local runtime-backed peers still work without live broker presence.
+- `runner=claude-code-agent` does not support real `fork` semantics.
+- Attention ack/snooze persistence is local extension state, not a shared cross-session protocol.
+- Teams backend is local to this repo, not a broader external team product integration.
+
+## Bottom line
+
+This repo is in a good state to share with other developers as a **local MVP with honest limits**.
