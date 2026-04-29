@@ -155,6 +155,7 @@ npm run demo --workspace @pi-claude-code-agent/subagents-backend -- "Reply with 
 3. Attention events exist now, but upstream `pi-subagents` control wiring still does not.
    - stale local background runs emit `attention` into run artifacts
    - the local extension now surfaces attention in the dashboard and supports ack/snooze for noisy runs
+   - local attention ack/snooze state is now persisted across pi restarts
    - no real upstream control-notification integration has been wired in this repo
 
 4. Clarify TUI not represented yet.

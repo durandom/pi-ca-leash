@@ -5,6 +5,7 @@ import { ClaudeCodeSubagentBackend } from "@pi-claude-code-agent/subagents-backe
 import { ClaudeCodeTeamsBackend } from "@pi-claude-code-agent/teams-backend";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { Box, Text, truncateToWidth, visibleWidth, type AutocompleteItem } from "@mariozechner/pi-tui";
+import { readAttentionLedger, serializeAttentionLedger, writeAttentionLedger } from "./persistence.js";
 import {
   acknowledgeAttention,
   createAttentionLedger,
@@ -73,6 +74,7 @@ let dashboardContextRef: ExtensionContext | ExtensionCommandContext | undefined;
 export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
   const cwd = process.cwd();
   const rootDir = resolve(cwd, ".pi-claude-code-agent");
+  const attentionLedgerPath = resolve(rootDir, "extension", "attention-ledger.json");
   const runtime = new ClaudeCodeRuntime({
     storageDir: resolve(rootDir, "runtime"),
   });
@@ -92,9 +94,10 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
   let intercomTransport: PiIntercomTransport | undefined;
   let intercomReachable: boolean | undefined;
   let backgroundMonitorTimer: NodeJS.Timeout | undefined;
-  let attentionLedger: AttentionLedger = createAttentionLedger();
+  let attentionLedger: AttentionLedger = await readAttentionLedger(attentionLedgerPath);
+  let persistedAttentionLedger = serializeAttentionLedger(attentionLedger);
 
-  const extensionVersion = "dev-reload-6";
+  const extensionVersion = "dev-reload-7";
   const startupSummary = `pi-claude-code-agent ${extensionVersion} loaded`;
   const dashboardState: DashboardState = createDashboardState(startupSummary);
 
@@ -153,10 +156,20 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
     return true;
   }
 
+  async function persistAttentionLedger(): Promise<void> {
+    const nextSerialized = serializeAttentionLedger(attentionLedger);
+    if (nextSerialized === persistedAttentionLedger) {
+      return;
+    }
+    await writeAttentionLedger(attentionLedgerPath, attentionLedger);
+    persistedAttentionLedger = nextSerialized;
+  }
+
   async function syncAttentionLedger() {
     const runs = await subagents.listRuns();
     const next = reconcileAttentionLedger(attentionLedger, runs, Date.now());
     attentionLedger = next.ledger;
+    await persistAttentionLedger();
     return next;
   }
 
@@ -241,7 +254,9 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
     await bridge.close();
     intercomTransport = undefined;
     intercomReachable = undefined;
+    await persistAttentionLedger();
     attentionLedger = createAttentionLedger();
+    persistedAttentionLedger = serializeAttentionLedger(attentionLedger);
   });
 
   registerClaudeCommand(pi, "claude-dev-ping", "Proof that pi-claude-code-agent reloaded successfully", async (_args, ctx) => {
@@ -467,6 +482,7 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
     const attention = await syncAttentionLedger();
     const view = resolveAttentionRun(token, attention.active);
     attentionLedger = acknowledgeAttention(attentionLedger, view.run.runId);
+    await persistAttentionLedger();
     await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Attention ack ${shortId(view.run.runId)}`);
     sendCommandMessage(pi, {
       level: "success",
@@ -493,6 +509,7 @@ export default async function claudeCodeAgentExtension(pi: ExtensionAPI) {
     const view = resolveAttentionRun(token, attention.active);
     const snoozedUntil = Date.now() + minutes * 60_000;
     attentionLedger = snoozeAttention(attentionLedger, view.run.runId, snoozedUntil);
+    await persistAttentionLedger();
     await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Attention snoozed ${shortId(view.run.runId)}`);
     sendCommandMessage(pi, {
       level: "success",

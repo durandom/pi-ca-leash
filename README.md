@@ -32,6 +32,7 @@ Subagent backend provides:
 - startup rehydration from persisted runtime/run state
 - attention events for stale background runs
 - extension-side attention list / ack / snooze UX
+- persisted local attention ack/snooze state across pi restarts
 - result collection and control APIs
 
 Teams backend provides:
@@ -81,6 +82,7 @@ The extension currently adds:
 - background dashboard refresh every 5s
 - explicit intercom disconnect/reconnect notices
 - attention notifications plus ack/snooze controls for noisy runs
+- persisted local attention state in `.pi-claude-code-agent/extension/attention-ledger.json`
 
 ## Extension commands
 
@@ -121,7 +123,14 @@ State is persisted under:
 3. `@pi-claude-code-agent/subagents-backend` — implemented, with restart rehydration and attention events
 4. `@pi-claude-code-agent/teams-backend` — implemented, with teammate restore and task auto-classification
 
-Extension test coverage now lives in `extensions/support.test.ts` for dashboard/attention/intercom monitor helpers.
+Extension test coverage now lives in:
+- `extensions/support.test.ts` for dashboard/attention/intercom monitor helpers
+- `extensions/persistence.test.ts` for persisted attention state round-trip/sanitization
+
+Environment-dependent truth:
+- package/workspace tests are green
+- extension helper/state logic is tested directly
+- full extension host loading still depends on a real pi installation providing peer packages and host runtime
 
 See:
 - `docs/IMPLEMENTATION_PLAN.md`

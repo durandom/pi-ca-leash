@@ -736,7 +736,7 @@ Remaining gaps:
 
 1. No proven upstream `pi-subagents` package wiring from this repo into the real installed extension.
 2. Late broker availability is handled in the local extension via retry/rebind, but broker spawning is still owned by `pi-intercom`.
-3. Attention ack/snooze is currently local extension state, not a shared persisted control protocol.
+3. Attention ack/snooze is currently persisted local extension state, not a shared cross-session control protocol.
 4. Cross-process resurrection is still limited: persisted state survives, active in-flight process control does not.
 5. Teams backend remains local/package-level rather than integrated into any broader external team product.
 
