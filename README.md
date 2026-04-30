@@ -25,6 +25,7 @@ Not claimed here:
 
 Start here:
 - `README.md` — what this repo is and how to try it
+- `MANUAL_TEST_PLAN.md` — fresh-session operator checklist
 - `ARCHITECTURE.md` — how the pieces fit together
 - `KNOWN_LIMITS.md` — explicit constraints and non-goals
 - `CHANGELOG.md` — notable changes over time
