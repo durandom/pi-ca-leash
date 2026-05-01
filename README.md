@@ -47,10 +47,15 @@ extensions/
 
 ### `@pi-claude-code-agent/runtime`
 Provides:
-- Claude-backed session start/resume
+- Claude-backed session start/resume by default
+- optional experimental `codex-cli` runtime driver
 - normalized runtime events
 - persisted session state and transcript
 - interrupt/stop lifecycle controls
+
+Truth:
+- Codex support is currently runtime-level and experimental.
+- Unsupported Codex options are rejected instead of being silently mapped to fake Claude parity.
 
 ### `@pi-claude-code-agent/intercom-bridge`
 Provides:
@@ -59,6 +64,11 @@ Provides:
 - idle-cycle reply extraction
 - persisted peer registry with restart restore
 - optional live `pi-intercom` broker transport when reachable
+- persisted per-peer runtime driver identity
+
+Truth:
+- Bridge peers can carry `driver: "claude-sdk" | "codex-cli"`.
+- Extension UX still launches Claude-first peers today.
 
 ### `@pi-claude-code-agent/subagents-backend`
 Provides:
@@ -234,6 +244,7 @@ See `KNOWN_LIMITS.md` for the blunt version.
 Most important limits:
 - Full extension-host smoke testing still depends on a real pi installation and host runtime.
 - Intercom broker availability is optional; local runtime-backed peers still work without live broker presence.
+- Experimental Codex support is not exposed through the default extension peer UX yet.
 - `runner=claude-code-agent` does not support real `fork` semantics.
 - Attention ack/snooze persistence is local extension state, not a shared cross-session protocol.
 - Teams backend is local to this repo, not a broader external team product integration.

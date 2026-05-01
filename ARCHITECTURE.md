@@ -9,15 +9,15 @@
 That leads to a layered design.
 
 ```text
-Claude Code SDK / driver
-        ↓
-packages/runtime
-        ↓
-packages/intercom-bridge
-        ↓
-packages/subagents-backend    packages/teams-backend
-        ↓                     ↓
-             extensions/index.ts
+Claude SDK driver (default)    Codex CLI driver (experimental)
+             ↓                          ↓
+                   packages/runtime
+                          ↓
+               packages/intercom-bridge
+                          ↓
+     packages/subagents-backend    packages/teams-backend
+                          ↓                     ↓
+                       extensions/index.ts
 ```
 
 ## Layers
@@ -28,16 +28,20 @@ Path:
 - `packages/runtime`
 
 Responsibility:
-- start Claude-backed sessions
+- start driver-backed sessions
 - resume/send messages into existing sessions
 - normalize runtime events
 - persist session state and transcript
 - expose status, listing, event streaming, interrupt, and stop
 
-This package is the source of truth for Claude session lifecycle.
+This package is the source of truth for runtime session lifecycle.
+
+Current drivers:
+- `claude-sdk` is the default and most complete path.
+- `codex-cli` exists as an experimental runtime driver with a narrower supported option set.
 
 Important consequence:
-- higher layers should not reinvent Claude session persistence or control semantics
+- higher layers should not reinvent runtime session persistence or control semantics
 
 ### 2. Intercom bridge layer
 
@@ -50,10 +54,12 @@ Responsibility:
 - wait for the next idle cycle to determine replies
 - persist peer registry for restart restore
 - optionally bind peers to live `pi-intercom` transport when broker is reachable
+- preserve per-peer runtime driver identity
 
 Important consequence:
 - intercom transport is optional
 - the bridge still works locally without live broker presence
+- peers may now be runtime-backed by different drivers even though the extension UX is still Claude-first
 
 ### 3. Subagent backend layer
 

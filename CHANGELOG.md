@@ -4,6 +4,9 @@ All notable changes to this repository should be recorded here.
 
 ## Unreleased
 
+### Changed
+- Runtime now includes an optional experimental `codex-cli` driver, and bridge peers now persist selected runtime driver identity.
+
 - README, architecture notes, known limits, and agent guidance were consolidated and cleaned up for shareability.
 - Historical session-plan docs were removed in favor of a single current documentation set.
 
