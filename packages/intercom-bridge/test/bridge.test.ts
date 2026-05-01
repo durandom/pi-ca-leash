@@ -7,6 +7,7 @@ import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, Runtim
 import { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime";
 import {
   ClaudeRuntimeIntercomBridge,
+  extractLatestReplyText,
   extractReplyText,
   formatInboundMessage,
   type BridgeTransport,
@@ -17,28 +18,108 @@ import {
 
 class FakeDriver implements RuntimeDriver {
   readonly name = "claude-sdk" as const;
+  readonly runs: RuntimeDriverRunInput[] = [];
 
   run(input: RuntimeDriverRunInput, onEvent: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+    this.runs.push(input);
     let interrupted = false;
     const done = (async () => {
-      await onEvent({ type: "raw", payload: { type: "system", subtype: "init", session_id: input.resumeSessionId ?? input.sessionId, model: input.model ?? "fake-model" } });
       await onEvent({
-        type: "raw",
+        type: "message",
         payload: {
-          type: "assistant",
-          message: {
-            content: [{ type: "text", text: `reply:${input.prompt}` }],
-          },
+          type: "system",
+          subtype: "init",
+          sessionId: input.resumeSessionId ?? input.sessionId,
+          model: input.model ?? "fake-model",
+          raw: { type: "system", subtype: "init", session_id: input.resumeSessionId ?? input.sessionId, model: input.model ?? "fake-model" },
         },
       });
+      if (input.prompt.includes("use-tool")) {
+        await onEvent({
+          type: "message",
+          payload: {
+            type: "assistant",
+            blocks: [
+              { type: "thinking", text: "secret plan", raw: { type: "thinking", thinking: "secret plan" } },
+              { type: "tool_use", id: "tool-1", name: "Bash", input: { command: "pwd" }, raw: { type: "tool_use", id: "tool-1", name: "Bash", input: { command: "pwd" } } },
+              { type: "text", text: `visible:${input.prompt}`, raw: { type: "text", text: `visible:${input.prompt}` } },
+            ],
+            raw: {
+              type: "assistant",
+              message: {
+                content: [
+                  { type: "thinking", thinking: "secret plan" },
+                  { type: "tool_use", id: "tool-1", name: "Bash", input: { command: "pwd" } },
+                  { type: "text", text: `visible:${input.prompt}` },
+                ],
+              },
+            },
+          },
+        });
+        await onEvent({
+          type: "message",
+          payload: {
+            type: "tool_use",
+            toolName: "Bash",
+            toolUseId: "tool-1",
+            input: { command: "pwd" },
+            raw: { type: "tool_use", id: "tool-1", name: "Bash", input: { command: "pwd" } },
+          },
+        });
+        await onEvent({
+          type: "message",
+          payload: {
+            type: "tool_result",
+            role: "user",
+            blocks: [{
+              type: "tool_result",
+              content: "/tmp/demo",
+              isError: false,
+              raw: { type: "tool_result", tool_use_id: "tool-1", content: "/tmp/demo", is_error: false },
+            }],
+            toolName: "Bash",
+            toolUseId: "tool-1",
+            output: { tool_name: "Bash", stdout: "/tmp/demo" },
+            isError: false,
+            raw: {
+              type: "user",
+              message: {
+                content: [{ type: "tool_result", tool_use_id: "tool-1", content: "/tmp/demo", is_error: false }],
+              },
+              tool_use_result: { tool_name: "Bash", stdout: "/tmp/demo" },
+            },
+          },
+        });
+      } else {
+        await onEvent({
+          type: "message",
+          payload: {
+            type: "assistant",
+            blocks: [{ type: "text", text: `reply:${input.prompt}`, raw: { type: "text", text: `reply:${input.prompt}` } }],
+            raw: {
+              type: "assistant",
+              message: {
+                content: [{ type: "text", text: `reply:${input.prompt}` }],
+              },
+            },
+          },
+        });
+      }
       await onEvent({
-        type: "raw",
+        type: "message",
         payload: {
           type: "result",
-          is_error: false,
-          result: `done:${input.prompt}`,
-          stop_reason: "end_turn",
-          usage: { input_tokens: 1, output_tokens: 2 },
+          ok: true,
+          summary: `done:${input.prompt}`,
+          stopReason: "end_turn",
+          usage: { inputTokens: 1, outputTokens: 2, raw: { input_tokens: 1, output_tokens: 2 } },
+          raw: {
+            type: "result",
+            is_error: false,
+            result: `done:${input.prompt}`,
+            stop_reason: "end_turn",
+            usage: { input_tokens: 1, output_tokens: 2 },
+          },
         },
       });
       return { code: interrupted ? 130 : 0, signal: interrupted ? "SIGINT" : null } as const;
@@ -88,16 +169,28 @@ class FakeTransport implements BridgeTransport {
 
 test("launch registers peer and ask waits for idle-cycle reply", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir, driver: new FakeDriver() });
+  const driver = new FakeDriver();
+  const runtime = new ClaudeCodeRuntime({ storageDir, driver });
   const bridge = new ClaudeRuntimeIntercomBridge({ runtime, pollIntervalMs: 5, askTimeoutMs: 2_000 });
 
-  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot" });
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", cwd: "/tmp/worker", model: "model-a" });
   assert.equal(peer.name, "worker");
   assert.equal(peer.state, "idle");
+  assert.equal(peer.cwd, "/tmp/worker");
+  assert.equal(peer.model, "model-a");
 
-  const result = await bridge.ask("worker", { from: "planner", text: "status?" });
+  const result = await bridge.ask("worker", { from: "planner", text: "status?", model: "model-b" });
   assert.equal(result.peer.state, "idle");
+  assert.equal(result.peer.model, "model-b");
   assert.match(result.reply, /reply:\[intercom kind=ask from=planner\]/);
+
+  const followUp = await bridge.ask("worker", { from: "planner", text: "status again?" });
+  assert.equal(followUp.peer.model, "model-b");
+
+  assert.equal(driver.runs[0]?.cwd, "/tmp/worker");
+  assert.equal(driver.runs[0]?.model, "model-a");
+  assert.equal(driver.runs[1]?.model, "model-b");
+  assert.equal(driver.runs[2]?.model, "model-b");
 });
 
 test("send and reply both route through runtime send", async () => {
@@ -114,6 +207,36 @@ test("send and reply both route through runtime send", async () => {
 
   const events = await runtime.events(afterReply.sessionId);
   assert.equal(events.items.filter((event) => event.type === "result").length, 3);
+});
+
+test("two peers stay isolated while replies ignore thinking and tool traffic", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir, driver: new FakeDriver() });
+  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, pollIntervalMs: 5, askTimeoutMs: 2_000 });
+
+  const alpha = await bridge.launchPeer({ name: "alpha", prompt: "boot alpha" });
+  const beta = await bridge.launchPeer({ name: "beta", prompt: "boot beta" });
+
+  const alphaAsk1 = await bridge.ask("alpha", { from: "planner", text: "use-tool alpha status" });
+  assert.equal(alphaAsk1.peer.state, "idle");
+  assert.equal(alphaAsk1.peer.sessionId, alpha.sessionId);
+  assert.match(alphaAsk1.reply, /visible:\[intercom kind=ask from=planner\]\n\nuse-tool alpha status/);
+  assert.doesNotMatch(alphaAsk1.reply, /secret plan/);
+  assert.doesNotMatch(alphaAsk1.reply, /\/tmp\/demo/);
+  assert.equal(alphaAsk1.events.filter((event) => event.type === "tool").length, 2);
+
+  const betaAsk = await bridge.ask("beta", { from: "planner", text: "plain beta status" });
+  assert.equal(betaAsk.peer.state, "idle");
+  assert.equal(betaAsk.peer.sessionId, beta.sessionId);
+  assert.match(betaAsk.reply, /reply:\[intercom kind=ask from=planner\]\n\nplain beta status/);
+  assert.doesNotMatch(betaAsk.reply, /alpha status/);
+
+  const alphaAsk2 = await bridge.ask("alpha", { from: "planner", text: "plain alpha follow-up" });
+  assert.equal(alphaAsk2.peer.sessionId, alpha.sessionId);
+  assert.match(alphaAsk2.reply, /reply:\[intercom kind=ask from=planner\]\n\nplain alpha follow-up/);
+
+  const peers = await bridge.listPeers();
+  assert.deepEqual(peers.map((peer) => [peer.name, peer.state]), [["alpha", "idle"], ["beta", "idle"]]);
 });
 
 test("transport registers peer and inbound ask auto-replies", async () => {
@@ -202,7 +325,7 @@ test("setTransport late-binds existing peers", async () => {
   assert.equal(transport.registrations.has("worker"), true);
 });
 
-test("helper formatting extracts last assistant text", () => {
+test("helper formatting extracts visible assistant text only", () => {
   const inbound = formatInboundMessage({ kind: "ask", from: "planner", text: "hi", replyTo: "msg-1" });
   assert.match(inbound, /^\[intercom kind=ask from=planner replyTo=msg-1\]/);
 
@@ -216,9 +339,87 @@ test("helper formatting extracts last assistant text", () => {
       role: "assistant",
       message: {
         role: "assistant",
-        blocks: [{ type: "text", text: "first" }, { type: "text", text: "second" }],
+        blocks: [
+          { type: "thinking", text: "secret plan", raw: { thinking: "secret plan" } },
+          { type: "text", text: "first" },
+          { type: "text", text: "second" },
+        ],
       },
     },
   ]);
   assert.equal(reply, "first\n\nsecond");
+});
+
+test("helper formatting falls back to result summary when assistant text is only thinking", () => {
+  const reply = extractReplyText([
+    {
+      id: "1",
+      sessionId: "sid",
+      sequence: 1,
+      timestamp: new Date().toISOString(),
+      type: "message",
+      role: "assistant",
+      message: {
+        role: "assistant",
+        blocks: [{ type: "thinking", text: "secret plan", raw: { thinking: "secret plan" } }],
+      },
+    },
+    {
+      id: "2",
+      sessionId: "sid",
+      sequence: 2,
+      timestamp: new Date().toISOString(),
+      type: "result",
+      ok: true,
+      summary: "done without visible reply",
+      raw: {},
+    },
+  ]);
+
+  assert.equal(reply, "done without visible reply");
+});
+
+test("latest reply extraction returns only the last visible assistant message", () => {
+  const timestamp = new Date().toISOString();
+  const reply = extractLatestReplyText([
+    {
+      id: "1",
+      sessionId: "sid",
+      sequence: 1,
+      timestamp,
+      type: "message",
+      role: "assistant",
+      message: {
+        role: "assistant",
+        blocks: [{ type: "text", text: "Ready." }],
+      },
+    },
+    {
+      id: "2",
+      sessionId: "sid",
+      sequence: 2,
+      timestamp,
+      type: "result",
+      ok: true,
+      summary: "done:ready",
+      raw: {},
+    },
+    {
+      id: "3",
+      sessionId: "sid",
+      sequence: 3,
+      timestamp,
+      type: "message",
+      role: "assistant",
+      message: {
+        role: "assistant",
+        blocks: [
+          { type: "thinking", text: "secret plan", raw: { thinking: "secret plan" } },
+          { type: "text", text: "final-only" },
+        ],
+      },
+    },
+  ]);
+
+  assert.equal(reply, "final-only");
 });

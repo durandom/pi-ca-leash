@@ -1,9 +1,13 @@
-type DriverMessage = {
-  type: string;
-  content?: string;
-  metadata?: Record<string, unknown>;
-};
-
+import type {
+  AssistantDriverMessage,
+  NormalizedDriverMessage,
+  NormalizedDriverMessageBlock,
+  NormalizedDriverUsage,
+  StreamEventDriverMessage,
+  SystemDriverMessage,
+  ToolResultDriverMessage,
+  ToolUseDriverMessage,
+} from "./messages.js";
 import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, RuntimeDriverRunInput } from "../types.js";
 
 function parseJsonOrRaw(value: string): unknown {
@@ -58,36 +62,88 @@ class MessageStream implements AsyncIterable<StreamUserMessage> {
   }
 }
 
-function parseAssistantBlocks(blocks: unknown[], model?: unknown): DriverMessage[] {
-  return blocks.flatMap((block): DriverMessage[] => {
-    const item = block as Record<string, unknown>;
-    const type = String(item.type ?? item.constructor?.name ?? "");
-    if (type === "text" || type === "TextBlock") {
-      return [{ type: "assistant", content: String(item.text ?? ""), metadata: { model } }];
-    }
-    if (type === "tool_use" || type === "ToolUseBlock") {
-      return [{
-        type: "tool_use",
-        content: `Using tool: ${String(item.name ?? "")}`,
-        metadata: { tool_name: item.name, tool_input: item.input, tool_use_id: item.id },
-      }];
-    }
-    if (type === "tool_result" || type === "ToolResultBlock") {
-      const content = typeof item.content === "string" ? item.content : JSON.stringify(item.content ?? "");
-      return [{
-        type: "tool_result",
-        content,
-        metadata: { tool_use_id: item.tool_use_id ?? item.toolUseId, is_error: item.is_error ?? item.isError ?? false },
-      }];
-    }
-    if (type === "thinking" || type === "ThinkingBlock") {
-      return [{ type: "assistant", content: `[thinking] ${String(item.thinking ?? "")}`, metadata: { thinking: true } }];
-    }
-    return [];
-  });
+function toBlock(block: unknown): NormalizedDriverMessageBlock {
+  const item = block as Record<string, unknown>;
+  return {
+    type: String(item.type ?? item.constructor?.name ?? "unknown"),
+    text: typeof item.text === "string" ? item.text : undefined,
+    name: typeof item.name === "string" ? item.name : undefined,
+    id: typeof item.id === "string" ? item.id : undefined,
+    input: item.input,
+    content: item.content,
+    isError: typeof item.is_error === "boolean" ? item.is_error : typeof item.isError === "boolean" ? item.isError : undefined,
+    raw: item,
+  };
 }
 
-export function parseClaudeSdkMessage(message: unknown): DriverMessage[] {
+function toUsage(usage: unknown, totalCostUsd?: unknown): NormalizedDriverUsage | undefined {
+  if (!usage || typeof usage !== "object") {
+    return typeof totalCostUsd === "number" ? { totalCostUsd } : undefined;
+  }
+  const value = usage as Record<string, unknown>;
+  return {
+    inputTokens: typeof value.input_tokens === "number" ? value.input_tokens : undefined,
+    outputTokens: typeof value.output_tokens === "number" ? value.output_tokens : undefined,
+    cacheCreationInputTokens: typeof value.cache_creation_input_tokens === "number"
+      ? value.cache_creation_input_tokens
+      : undefined,
+    cacheReadInputTokens: typeof value.cache_read_input_tokens === "number" ? value.cache_read_input_tokens : undefined,
+    totalCostUsd: typeof totalCostUsd === "number" ? totalCostUsd : undefined,
+    raw: usage,
+  };
+}
+
+function parseAssistantMessage(message: Record<string, unknown>, raw: unknown): NormalizedDriverMessage[] {
+  const blocks = (Array.isArray(message.content) ? message.content : []).map(toBlock);
+  const result: NormalizedDriverMessage[] = [
+    {
+      type: "assistant",
+      blocks,
+      model: typeof message.model === "string" ? message.model : undefined,
+      raw,
+    } satisfies AssistantDriverMessage,
+  ];
+
+  for (const block of blocks) {
+    if (block.type === "tool_use") {
+      result.push({
+        type: "tool_use",
+        toolName: block.name ?? "unknown",
+        toolUseId: block.id,
+        input: block.input,
+        raw: block.raw,
+      } satisfies ToolUseDriverMessage);
+    }
+  }
+
+  return result;
+}
+
+function parseUserMessage(message: Record<string, unknown>, raw: unknown, toolUseResult: unknown): NormalizedDriverMessage[] {
+  const blocks = (Array.isArray(message.content) ? message.content : []).map(toBlock);
+  const toolResultBlock = blocks.find((block) => block.type === "tool_result");
+  if (!toolResultBlock) {
+    return [];
+  }
+
+  const toolResult = toolUseResult && typeof toolUseResult === "object"
+    ? toolUseResult as Record<string, unknown>
+    : undefined;
+  return [{
+    type: "tool_result",
+    role: "user",
+    blocks,
+    toolName: typeof toolResult?.tool_name === "string" ? toolResult.tool_name : toolResultBlock.name ?? "tool",
+    toolUseId: typeof (toolResultBlock.raw as Record<string, unknown> | undefined)?.tool_use_id === "string"
+      ? String((toolResultBlock.raw as Record<string, unknown>).tool_use_id)
+      : undefined,
+    output: toolResult ?? toolResultBlock.content,
+    isError: toolResultBlock.isError,
+    raw,
+  } satisfies ToolResultDriverMessage];
+}
+
+export function parseClaudeSdkMessage(message: unknown): NormalizedDriverMessage[] {
   if (!message || typeof message !== "object") {
     return [];
   }
@@ -95,50 +151,57 @@ export function parseClaudeSdkMessage(message: unknown): DriverMessage[] {
   const type = String(item.type ?? item.constructor?.name ?? "");
 
   if (type === "system" || type === "SystemMessage") {
-    const metadata = { subtype: item.subtype, ...((item.data as Record<string, unknown> | undefined) ?? {}) } as Record<string, unknown>;
-    if (item.session_id || item.sessionId) {
-      metadata.session_id = item.session_id ?? item.sessionId;
-    }
-    if (item.cwd) {
-      metadata.cwd = item.cwd;
-    }
-    if (item.model) {
-      metadata.model = item.model;
-    }
-    return [{ type: "system", content: "", metadata }];
+    return [{
+      type: "system",
+      subtype: typeof item.subtype === "string" ? item.subtype : undefined,
+      sessionId: typeof item.session_id === "string" ? item.session_id : typeof item.sessionId === "string" ? item.sessionId : undefined,
+      cwd: typeof item.cwd === "string" ? item.cwd : undefined,
+      model: typeof item.model === "string" ? item.model : undefined,
+      metadata: { ...((item.data as Record<string, unknown> | undefined) ?? {}) },
+      raw: message,
+    } satisfies SystemDriverMessage];
   }
 
   if (type === "assistant" || type === "AssistantMessage") {
     const assistant = (item.message as Record<string, unknown> | undefined) ?? item;
-    const blocks = Array.isArray(assistant.content) ? assistant.content : Array.isArray(item.content) ? item.content : [];
-    return parseAssistantBlocks(blocks, assistant.model ?? item.model);
+    return parseAssistantMessage(assistant, message);
+  }
+
+  if (type === "user" || type === "UserMessage") {
+    const user = (item.message as Record<string, unknown> | undefined) ?? item;
+    return parseUserMessage(user, message, item.tool_use_result);
   }
 
   if (type === "result" || type === "ResultMessage") {
     return [{
       type: "result",
-      content: String(item.result ?? ""),
-      metadata: {
-        session_id: item.session_id ?? item.sessionId,
-        is_error: item.is_error ?? item.isError,
-        duration_ms: item.duration_ms ?? item.durationMs,
-        total_cost_usd: item.total_cost_usd ?? item.totalCostUsd,
-        num_turns: item.num_turns ?? item.numTurns,
-        usage: item.usage,
-      },
+      ok: !Boolean(item.is_error ?? item.isError),
+      summary: typeof item.result === "string" ? item.result : JSON.stringify(item.result ?? ""),
+      stopReason: typeof item.stop_reason === "string" ? item.stop_reason : undefined,
+      usage: toUsage(item.usage, item.total_cost_usd ?? item.totalCostUsd),
+      raw: message,
     }];
   }
 
-  if (type === "user" || type === "UserMessage") {
-    return [];
+  if (type === "error" || type === "ErrorMessage") {
+    return [{
+      type: "error",
+      message: typeof item.message === "string" ? item.message : JSON.stringify(item),
+      code: typeof item.code === "string" ? item.code : undefined,
+      raw: message,
+    }];
   }
 
   if (["rate_limit_event", "task_notification", "compact_boundary"].includes(type)) {
     return [{
       type: "stream_event",
-      content: String(item.summary ?? item.subtype ?? type),
-      metadata: { event_type: type, session_id: item.session_id ?? item.sessionId },
-    }];
+      summary: String(item.summary ?? item.subtype ?? type),
+      metadata: {
+        eventType: type,
+        sessionId: item.session_id ?? item.sessionId,
+      },
+      raw: message,
+    } satisfies StreamEventDriverMessage];
   }
 
   return [];
@@ -186,7 +249,9 @@ export class ClaudeSdkDriver implements RuntimeDriver {
             if (controller.signal.aborted) {
               throw abortError();
             }
-            await onEvent({ type: "raw", payload: message });
+            for (const normalized of parseClaudeSdkMessage(message)) {
+              await onEvent({ type: "message", payload: normalized });
+            }
           }
           return { code: 0, signal: null };
         } finally {

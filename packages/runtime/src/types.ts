@@ -1,5 +1,7 @@
+import type { NormalizedDriverMessage } from "./drivers/messages.js";
+
 export type RuntimeSessionId = string;
-export type RuntimeDriverName = "claude-sdk";
+export type RuntimeDriverName = "claude-sdk" | "codex-cli";
 
 export type RuntimeSessionState =
   | "starting"
@@ -60,6 +62,7 @@ export interface RuntimeStatus {
 
 export interface StartSessionInput {
   prompt: string;
+  driver?: RuntimeDriverName;
   cwd?: string;
   model?: string;
   name?: string;
@@ -195,10 +198,23 @@ export interface RuntimeDriverRunInput {
   resumeSessionId?: string;
 }
 
-export interface DriverEventEnvelope {
-  type: "raw" | "message" | "tool" | "result" | "error" | "session";
-  payload: unknown;
-}
+export type DriverEventEnvelope =
+  | {
+      type: "raw";
+      payload: unknown;
+    }
+  | {
+      type: "message";
+      payload: NormalizedDriverMessage;
+    }
+  | {
+      type: "error";
+      payload: {
+        message?: string;
+        code?: string;
+        raw?: unknown;
+      };
+    };
 
 export interface RuntimeDriverRunHandle {
   kill(signal?: NodeJS.Signals): void;
@@ -213,7 +229,12 @@ export interface RuntimeDriver {
   ): RuntimeDriverRunHandle;
 }
 
+export type RuntimeDriverResolver = (name: RuntimeDriverName) => RuntimeDriver;
+
 export interface RuntimeOptions {
   storageDir?: string;
   driver?: RuntimeDriver;
+  drivers?: Partial<Record<RuntimeDriverName, RuntimeDriver>>;
+  defaultDriver?: RuntimeDriverName;
+  resolveDriver?: RuntimeDriverResolver;
 }

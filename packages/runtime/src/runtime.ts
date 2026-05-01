@@ -12,7 +12,8 @@ import {
   tailTranscript,
   writeState,
 } from "./persistence.js";
-import { ClaudeSdkDriver } from "./drivers/claude-sdk.js";
+import { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js";
+import type { NormalizedDriverMessage, NormalizedDriverMessageBlock } from "./drivers/messages.js";
 import type {
   DriverEventEnvelope,
   ErrorEvent,
@@ -20,10 +21,12 @@ import type {
   MessageEvent,
   ResultEvent,
   RuntimeDriver,
+  RuntimeDriverName,
+  RuntimeDriverResolver,
   RuntimeEvent,
+  RuntimeMessageBlock,
   RuntimeOptions,
   RuntimeSessionId,
-  RuntimeSessionState,
   RuntimeStatus,
   SendMessageInput,
   SessionCreatedEvent,
@@ -38,27 +41,53 @@ import type {
 interface ActiveRun {
   runId: string;
   handle: ReturnType<RuntimeDriver["run"]>;
+  requestedModel?: string;
 }
 
 export class ClaudeCodeRuntime {
   private readonly storageDir: string;
-  private readonly driver: RuntimeDriver;
+  private readonly drivers = new Map<RuntimeDriverName, RuntimeDriver>();
+  private readonly defaultDriverName: RuntimeDriverName;
+  private readonly resolveDriverByName: RuntimeDriverResolver;
   private readonly emitter = new EventEmitter();
   private readonly activeRuns = new Map<RuntimeSessionId, ActiveRun>();
   private readonly sequences = new Map<RuntimeSessionId, number>();
 
   constructor(options: RuntimeOptions = {}) {
     this.storageDir = resolve(options.storageDir ?? defaultStorageDir());
-    this.driver = options.driver ?? new ClaudeSdkDriver();
+
+    const defaultClaudeDriver = new ClaudeSdkDriver();
+    this.drivers.set(defaultClaudeDriver.name, defaultClaudeDriver);
+    if (options.drivers) {
+      for (const driver of Object.values(options.drivers)) {
+        if (driver) {
+          this.drivers.set(driver.name, driver);
+        }
+      }
+    }
+    if (options.driver) {
+      this.drivers.set(options.driver.name, options.driver);
+    }
+
+    this.defaultDriverName = options.defaultDriver ?? options.driver?.name ?? "claude-sdk";
+    this.resolveDriverByName = options.resolveDriver ?? ((name) => {
+      const driver = this.drivers.get(name);
+      if (!driver) {
+        throw new Error(`No runtime driver registered for ${name}`);
+      }
+      return driver;
+    });
   }
 
   async start(input: StartSessionInput): Promise<RuntimeStatus> {
     const sessionId = randomUUID();
+    const driverName = input.driver ?? this.defaultDriverName;
+    const driver = this.resolveDriver(driverName);
     const cwd = resolve(input.cwd ?? process.cwd());
     const now = new Date().toISOString();
     const status: RuntimeStatus = {
       sessionId,
-      driver: this.driver.name,
+      driver: driver.name,
       driverSessionId: sessionId,
       state: "starting",
       cwd,
@@ -208,7 +237,8 @@ export class ClaudeCodeRuntime {
       next,
     );
 
-    const handle = this.driver.run(
+    const driver = this.resolveDriver(status.driver);
+    const handle = driver.run(
       {
         sessionId: status.sessionId,
         prompt: input.prompt,
@@ -227,7 +257,7 @@ export class ClaudeCodeRuntime {
       },
     );
 
-    this.activeRuns.set(status.sessionId, { runId, handle });
+    this.activeRuns.set(status.sessionId, { runId, handle, requestedModel: input.model });
     void this.waitForRunCompletion(status.sessionId, runId, handle);
   }
 
@@ -286,133 +316,163 @@ export class ClaudeCodeRuntime {
   }
 
   private async handleDriverEvent(sessionId: RuntimeSessionId, envelope: DriverEventEnvelope): Promise<void> {
-    if (envelope.type === "error") {
-      const payload = envelope.payload as { message?: string; code?: string };
-      const current = await this.patchStatus(sessionId, {
-        lastError: {
-          message: payload.message ?? "Unknown driver error",
-          code: payload.code,
-        },
-      });
-      await this.emitEvent(
-        {
-          type: "error",
-          sessionId,
-          message: payload.message ?? "Unknown driver error",
-          code: payload.code,
-          raw: envelope.payload,
-        },
-        current,
-      );
-      return;
-    }
-
-    const raw = envelope.payload as Record<string, unknown>;
-    const current = await this.requireSession(sessionId);
-
-    if (raw.type === "system" && raw.subtype === "init") {
-      const updated = await this.patchStatus(sessionId, {
-        driverSessionId: String(raw.session_id ?? current.driverSessionId),
-        model: typeof raw.model === "string" ? raw.model : current.model,
-        raw: {
-          ...(current.raw ?? {}),
-          init: raw,
-        },
-      });
-      await this.emitEvent(
-        {
-          type: "session.updated",
-          sessionId,
-          state: updated.state,
-          patch: {
-            driverSessionId: updated.driverSessionId,
-            model: updated.model,
-          },
-          raw,
-        },
-        updated,
-      );
-      return;
-    }
-
-    if (raw.type === "assistant" || raw.type === "user") {
-      const role = raw.type === "assistant" ? "assistant" : "user";
-      const message = (raw.message ?? {}) as { content?: unknown[] };
-      const blocks = (message.content ?? []).map((block) => {
-        const value = block as Record<string, unknown>;
-        return {
-          type: String(value.type ?? "unknown"),
-          text: typeof value.text === "string" ? value.text : undefined,
-          name: typeof value.name === "string" ? value.name : undefined,
-          id: typeof value.id === "string" ? value.id : undefined,
-          input: value.input,
-          content: value.content,
-          isError: typeof value.is_error === "boolean" ? value.is_error : undefined,
-          raw: value,
-        };
-      });
-
-      const updated = await this.patchStatus(sessionId, {});
-      await this.emitEvent({ type: "message", sessionId, role, message: { role, blocks, raw } }, updated);
-
-      for (const block of blocks) {
-        if (block.type === "tool_use") {
-          await this.emitEvent(
-            {
-              type: "tool",
-              sessionId,
-              phase: "requested",
-              toolName: block.name ?? "unknown",
-              toolUseId: block.id,
-              input: block.input,
-              raw: block.raw,
-            },
-            updated,
-          );
-        }
-        if (block.type === "tool_result") {
-          await this.emitEvent(
-            {
-              type: "tool",
-              sessionId,
-              phase: "completed",
-              toolName: String((raw.tool_use_result as Record<string, unknown> | undefined)?.tool_name ?? "tool"),
-              toolUseId: typeof (block.raw as Record<string, unknown>).tool_use_id === "string"
-                ? String((block.raw as Record<string, unknown>).tool_use_id)
-                : undefined,
-              output: (raw.tool_use_result as Record<string, unknown> | undefined) ?? block.content,
-              isError: block.isError,
-              raw,
-            },
-            updated,
-          );
-        }
+    if (envelope.type === "raw") {
+      for (const message of parseClaudeSdkMessage(envelope.payload)) {
+        await this.handleDriverEvent(sessionId, { type: "message", payload: message });
       }
       return;
     }
 
-    if (raw.type === "result") {
-      const updated = await this.patchStatus(sessionId, {});
-      await this.emitEvent(
-        {
-          type: "result",
-          sessionId,
-          ok: !Boolean(raw.is_error),
-          summary: typeof raw.result === "string" ? raw.result : JSON.stringify(raw.result ?? ""),
-          stopReason: typeof raw.stop_reason === "string" ? raw.stop_reason : undefined,
-          usage: {
-            inputTokens: numberOrUndefined(raw.usage, "input_tokens"),
-            outputTokens: numberOrUndefined(raw.usage, "output_tokens"),
-            cacheCreationInputTokens: numberOrUndefined(raw.usage, "cache_creation_input_tokens"),
-            cacheReadInputTokens: numberOrUndefined(raw.usage, "cache_read_input_tokens"),
-            totalCostUsd: typeof raw.total_cost_usd === "number" ? raw.total_cost_usd : undefined,
-            raw: raw.usage,
-          },
-          raw,
-        },
-        updated,
-      );
+    if (envelope.type === "error") {
+      await this.emitError(sessionId, envelope.payload.message, envelope.payload.code, envelope.payload.raw ?? envelope.payload);
+      return;
     }
+
+    const current = await this.requireSession(sessionId);
+    const message = envelope.payload;
+
+    switch (message.type) {
+      case "system": {
+        if (message.subtype !== "init") {
+          return;
+        }
+        const active = this.activeRuns.get(sessionId);
+        const updated = await this.patchStatus(sessionId, {
+          driverSessionId: message.sessionId ?? current.driverSessionId,
+          model: active?.requestedModel ?? message.model ?? current.model,
+          raw: {
+            ...(current.raw ?? {}),
+            init: message.raw ?? message,
+          },
+        });
+        await this.emitEvent(
+          {
+            type: "session.updated",
+            sessionId,
+            state: updated.state,
+            patch: {
+              driverSessionId: updated.driverSessionId,
+              model: updated.model,
+            },
+            raw: message.raw ?? message,
+          },
+          updated,
+        );
+        return;
+      }
+
+      case "assistant": {
+        const updated = await this.patchStatus(sessionId, {});
+        await this.emitEvent(
+          {
+            type: "message",
+            sessionId,
+            role: "assistant",
+            message: { role: "assistant", blocks: toRuntimeBlocks(message.blocks), raw: message.raw ?? message },
+          },
+          updated,
+        );
+        return;
+      }
+
+      case "tool_use": {
+        const updated = await this.patchStatus(sessionId, {});
+        await this.emitEvent(
+          {
+            type: "tool",
+            sessionId,
+            phase: "requested",
+            toolName: message.toolName,
+            toolUseId: message.toolUseId,
+            input: message.input,
+            raw: message.raw ?? message,
+          },
+          updated,
+        );
+        return;
+      }
+
+      case "tool_result": {
+        const updated = await this.patchStatus(sessionId, {});
+        if (message.blocks?.length) {
+          const role = message.role ?? "user";
+          await this.emitEvent(
+            {
+              type: "message",
+              sessionId,
+              role,
+              message: { role, blocks: toRuntimeBlocks(message.blocks), raw: message.raw ?? message },
+            },
+            updated,
+          );
+        }
+        await this.emitEvent(
+          {
+            type: "tool",
+            sessionId,
+            phase: "completed",
+            toolName: message.toolName,
+            toolUseId: message.toolUseId,
+            output: message.output,
+            isError: message.isError,
+            raw: message.raw ?? message,
+          },
+          updated,
+        );
+        return;
+      }
+
+      case "result": {
+        const updated = await this.patchStatus(sessionId, {});
+        await this.emitEvent(
+          {
+            type: "result",
+            sessionId,
+            ok: message.ok,
+            summary: message.summary,
+            stopReason: message.stopReason,
+            usage: message.usage,
+            raw: message.raw ?? message,
+          },
+          updated,
+        );
+        return;
+      }
+
+      case "error": {
+        await this.emitError(sessionId, message.message, message.code, message.raw ?? message);
+        return;
+      }
+
+      case "stream_event":
+        return;
+
+      default:
+        return;
+    }
+  }
+
+  private async emitError(sessionId: RuntimeSessionId, message: string | undefined, code?: string, raw?: unknown): Promise<void> {
+    const current = await this.patchStatus(sessionId, {
+      lastError: {
+        message: message ?? "Unknown driver error",
+        code,
+      },
+    });
+    await this.emitEvent(
+      {
+        type: "error",
+        sessionId,
+        message: message ?? "Unknown driver error",
+        code,
+        raw,
+      },
+      current,
+    );
+  }
+
+  private resolveDriver(name: RuntimeDriverName): RuntimeDriver {
+    return this.resolveDriverByName(name);
   }
 
   private async patchStatus(
@@ -475,10 +535,15 @@ export class ClaudeCodeRuntime {
   }
 }
 
-function numberOrUndefined(value: unknown, key: string): number | undefined {
-  if (!value || typeof value !== "object") {
-    return undefined;
-  }
-  const field = (value as Record<string, unknown>)[key];
-  return typeof field === "number" ? field : undefined;
+function toRuntimeBlocks(blocks: NormalizedDriverMessageBlock[]): RuntimeMessageBlock[] {
+  return blocks.map((block) => ({
+    type: block.type,
+    text: block.text,
+    name: block.name,
+    id: block.id,
+    input: block.input,
+    content: block.content,
+    isError: block.isError,
+    raw: block.raw,
+  }));
 }
