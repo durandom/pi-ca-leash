@@ -1,5 +1,6 @@
 export { ClaudeCodeRuntime } from "./runtime.js";
 export { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js";
+export { CodexCliDriver, parseCodexCliEvent, buildCodexCliCommand } from "./drivers/codex-cli.js";
 export type { NormalizedDriverMessage } from "./drivers/messages.js";
 export type {
   DriverEventEnvelope,
