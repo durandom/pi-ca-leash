@@ -173,11 +173,12 @@ test("launch registers peer and ask waits for idle-cycle reply", async () => {
   const runtime = new ClaudeCodeRuntime({ storageDir, driver });
   const bridge = new ClaudeRuntimeIntercomBridge({ runtime, pollIntervalMs: 5, askTimeoutMs: 2_000 });
 
-  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", cwd: "/tmp/worker", model: "model-a" });
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk", cwd: "/tmp/worker", model: "model-a" });
   assert.equal(peer.name, "worker");
   assert.equal(peer.state, "idle");
   assert.equal(peer.cwd, "/tmp/worker");
   assert.equal(peer.model, "model-a");
+  assert.equal(peer.driver, "claude-sdk");
 
   const result = await bridge.ask("worker", { from: "planner", text: "status?", model: "model-b" });
   assert.equal(result.peer.state, "idle");

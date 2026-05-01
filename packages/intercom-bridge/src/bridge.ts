@@ -54,6 +54,7 @@ export class ClaudeRuntimeIntercomBridge {
     this.assertPeerNameAvailable(input.name);
     const status = await this.runtime.start({
       prompt: input.prompt,
+      driver: input.driver,
       cwd: input.cwd,
       model: input.model,
       name: input.name,
@@ -255,6 +256,7 @@ export class ClaudeRuntimeIntercomBridge {
       name,
       sessionId: status.sessionId,
       cwd: status.cwd,
+      driver: status.driver,
       model: status.model,
       state,
       createdAt: status.createdAt,

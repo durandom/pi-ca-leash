@@ -1,5 +1,6 @@
 import type {
   ClaudeCodeRuntime,
+  RuntimeDriverName,
   RuntimeEvent,
   RuntimeSessionId,
   RuntimeStatus,
@@ -23,6 +24,7 @@ export interface BridgePeer {
   sessionId: RuntimeSessionId;
   cwd: string;
   model?: string;
+  driver?: RuntimeDriverName;
   state: BridgeState;
   createdAt: string;
   updatedAt: string;
@@ -32,6 +34,7 @@ export interface BridgePeer {
 export interface LaunchPeerInput {
   name: string;
   prompt: string;
+  driver?: RuntimeDriverName;
   cwd?: string;
   model?: string;
   appendSystemPrompt?: string;
