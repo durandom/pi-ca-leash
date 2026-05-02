@@ -20,9 +20,19 @@ export function bridgeRegistryPath(storageDir: string): string {
 
 export async function readBridgeRegistry(storageDir: string): Promise<PersistedBridgeRegistry> {
   try {
-    return JSON.parse(await readFile(bridgeRegistryPath(storageDir), "utf8")) as PersistedBridgeRegistry;
+    const parsed = JSON.parse(await readFile(bridgeRegistryPath(storageDir), "utf8")) as {
+      peers?: Array<{ name?: unknown; sessionId?: unknown }>;
+    };
+    const peers = Array.isArray(parsed?.peers)
+      ? parsed.peers
+        .filter((peer): peer is { name: string; sessionId: string } =>
+          typeof peer?.name === "string" && typeof peer?.sessionId === "string"
+        )
+        .map((peer) => ({ name: peer.name, sessionId: peer.sessionId }))
+      : [];
+    return { peers };
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT" || error instanceof SyntaxError) {
       return { peers: [] };
     }
     throw error;
