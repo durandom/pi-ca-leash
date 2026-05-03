@@ -119,11 +119,12 @@ async function loadExtensionHarness(defaultDriver: "claude-sdk" | "codex-cli", o
   const lifecycle = new Map<string, (...args: any[]) => any>();
   const sentMessages: Array<{ message: unknown; options: unknown }> = [];
   const userMessages: Array<{ message: unknown; options: unknown }> = [];
+  const notifications: Array<{ message: string; type?: "info" | "warning" | "error" }> = [];
   const ctx = {
     ui: {
       setStatus() {},
       setWidget() {},
-      notify() {},
+      notify(message: string, type?: "info" | "warning" | "error") { notifications.push({ message, type }); },
     },
   };
 
@@ -152,6 +153,7 @@ async function loadExtensionHarness(defaultDriver: "claude-sdk" | "codex-cli", o
     cwd: tempCwd,
     sentMessages,
     userMessages,
+    notifications,
     async execute(name: string, params: unknown) {
       const tool = tools.get(name);
       assert.ok(tool, `Missing tool ${name}`);
@@ -282,9 +284,9 @@ test("peer_start returns and displays no-babysitting guidance", async () => {
     assert.match(toolText, /Do not poll it with peer_list, peer_history, or repeated peer_ask status checks\./);
     assert.equal(started.details.guidance.includes("Do not poll"), true);
 
-    const visibleStart = harness.sentMessages.find((entry) => String((entry.message as any)?.details?.title ?? "").startsWith("Peer started:"));
-    assert.ok(visibleStart, "peer_start should emit visible guidance message");
-    assert.match(String((visibleStart.message as any).content ?? ""), /Do not poll it with peer_list/);
+    const visibleStart = harness.notifications.find((entry) => entry.message.includes("Peer started:"));
+    assert.ok(visibleStart, "peer_start should emit operator guidance notification");
+    assert.match(visibleStart.message, /Do not poll it with peer_list/);
   } finally {
     await harness.close();
   }
@@ -317,16 +319,18 @@ test("peer_ask returns and displays the outgoing prompt", async () => {
     const outgoing = "Reply with exactly: peer-visible-prompt";
 
     const before = harness.sentMessages.length;
+    const noticeBefore = harness.notifications.length;
     const asked = await harness.execute("peer_ask", { name: peerName, message: outgoing });
     const toolText = String(asked.content?.[0]?.text ?? "");
-    assert.match(toolText, /sent prompt shown above in the chat/);
+    assert.match(toolText, /sent prompt shown in an operator notification/);
     assert.doesNotMatch(toolText, /sent to peer\n```text/);
     assert.equal(asked.details.message, outgoing);
 
     const messages = harness.sentMessages.slice(before);
-    const visibleAsk = messages.find((entry) => (entry.message as any)?.details?.title === `Sent to peer: ${peerName}`);
-    assert.ok(visibleAsk, "peer_ask should emit a visible outgoing prompt message");
-    assert.match(String((visibleAsk.message as any).content ?? ""), /Reply with exactly: peer-visible-prompt/);
+    assert.equal(messages.length, 0);
+    const visibleAsk = harness.notifications.slice(noticeBefore).find((entry) => entry.message.includes(`Sent to peer: ${peerName}`));
+    assert.ok(visibleAsk, "peer_ask should emit an outgoing prompt notification");
+    assert.match(visibleAsk.message, /Reply with exactly: peer-visible-prompt/);
   } finally {
     await harness.close();
   }

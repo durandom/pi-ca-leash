@@ -100,13 +100,14 @@ async function loadCommandHarness(options: { defaultDriver: "claude-sdk" | "code
   const renderers = new Map<string, (...args: any[]) => any>();
   const lifecycle = new Map<string, (...args: any[]) => any>();
   const sentMessages: Array<{ message: any; options: unknown }> = [];
+  const notifications: Array<{ message: string; type?: "info" | "warning" | "error" }> = [];
   const statusUpdates: Array<{ name: string; value: unknown }> = [];
   const widgets = new Map<string, unknown>();
   const ctx = {
     ui: {
       setStatus(name: string, value: unknown) { statusUpdates.push({ name, value }); },
       setWidget(name: string, widget: unknown) { widgets.set(name, widget); },
-      notify() {},
+      notify(message: string, type?: "info" | "warning" | "error") { notifications.push({ message, type }); },
     },
   };
 
@@ -134,6 +135,7 @@ async function loadCommandHarness(options: { defaultDriver: "claude-sdk" | "code
     commands,
     renderers,
     sentMessages,
+    notifications,
     statusUpdates,
     widgets,
     async run(name: string, args: string) {
@@ -170,6 +172,17 @@ function messageBody(entries: Array<{ message: any }>, title: RegExp): string {
   return String(entry.message?.content ?? "");
 }
 
+function latestNotification(entries: Array<{ message: string }>): string {
+  assert.ok(entries.length > 0, "Expected notifications");
+  return entries.at(-1)?.message ?? "";
+}
+
+function notificationMatching(entries: Array<{ message: string }>, pattern: RegExp): string {
+  const entry = entries.find((item) => pattern.test(item.message));
+  assert.ok(entry, `Expected notification matching ${pattern}`);
+  return entry.message;
+}
+
 test("/peer is the only public slash command by default", async () => {
   const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
   try {
@@ -177,6 +190,7 @@ test("/peer is the only public slash command by default", async () => {
     assert.equal([...harness.commands.keys()].some((name) => name.startsWith("claude-")), false);
     assert.equal(harness.widgets.has("peer-dashboard"), false);
     assert.equal(harness.statusUpdates.length, 0);
+    assert.equal(harness.notifications.length, 0);
   } finally {
     await harness.close();
   }
@@ -185,24 +199,30 @@ test("/peer is the only public slash command by default", async () => {
 test("/peer help stays passive while /peer init activates and shows guide", async () => {
   const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
   try {
+    const helpBefore = harness.notifications.length;
     const helpMessages = await harness.run("peer", "help");
-    assert.match(latestBody(helpMessages), /\/peer init/);
-    assert.match(latestBody(helpMessages), /pi-ca-leash v\d+\.\d+\.\d+/);
-    assert.match(latestBody(helpMessages), /\/peer about/);
+    assert.equal(helpMessages.length, 0);
+    const helpNotice = latestNotification(harness.notifications.slice(helpBefore));
+    assert.match(helpNotice, /\/peer init/);
+    assert.match(helpNotice, /pi-ca-leash v\d+\.\d+\.\d+/);
+    assert.match(helpNotice, /\/peer about/);
     assert.equal(harness.widgets.has("peer-dashboard"), false);
 
+    const aboutBefore = harness.notifications.length;
     const aboutMessages = await harness.run("peer", "about");
-    assert.match(latestBody(aboutMessages), /version \d+\.\d+\.\d+/);
-    assert.match(latestBody(aboutMessages), /default driver codex-cli/);
+    assert.equal(aboutMessages.length, 0);
+    const aboutNotice = latestNotification(harness.notifications.slice(aboutBefore));
+    assert.match(aboutNotice, /version \d+\.\d+\.\d+/);
+    assert.match(aboutNotice, /default driver codex-cli/);
     assert.equal(harness.widgets.has("peer-dashboard"), false);
 
+    const initNoticeBefore = harness.notifications.length;
     const initMessages = await harness.run("peer", "init");
     assert.match(String(initMessages.at(0)?.message?.details?.title ?? ""), /Agent orchestration guide/);
     assert.equal(initMessages.at(0)?.message?.details?.surface, "agent");
-    assert.match(String(initMessages.at(1)?.message?.details?.title ?? ""), /Peer mode active/);
-    assert.equal(initMessages.at(1)?.message?.details?.surface, "custom");
+    assert.equal(initMessages.length, 1);
 
-    const userHelp = messageBody(initMessages, /Peer mode active/);
+    const userHelp = notificationMatching(harness.notifications.slice(initNoticeBefore), /Peer mode active/);
     assert.match(userHelp, /Common commands:/);
     assert.match(userHelp, /\/peer start <prompt>/);
     assert.match(userHelp, /\/peer help/);
@@ -222,18 +242,21 @@ test("/peer help stays passive while /peer init activates and shows guide", asyn
 test("first actionable /peer command activates and shows guide once", async () => {
   const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
   try {
+    const noticeBefore = harness.notifications.length;
     const firstMessages = await harness.run("peer", "models codex-cli");
     assert.match(String(firstMessages.at(0)?.message?.details?.title ?? ""), /Agent orchestration guide/);
     assert.equal(firstMessages.at(0)?.message?.details?.surface, "agent");
-    assert.match(String(firstMessages.at(1)?.message?.details?.title ?? ""), /Peer mode active/);
-    assert.equal(firstMessages.at(1)?.message?.details?.surface, "custom");
-    assert.match(messageBody(firstMessages, /Peer mode active/), /\/peer help/);
+    assert.equal(firstMessages.length, 1);
+    const firstNotices = harness.notifications.slice(noticeBefore);
+    assert.match(notificationMatching(firstNotices, /Peer mode active/), /\/peer help/);
     assert.match(messageBody(firstMessages, /Agent orchestration guide/), /How to work with pi-ca-leash:/);
-    assert.match(latestBody(firstMessages), /codex-cli models/);
+    assert.match(notificationMatching(firstNotices, /Runtime models/), /codex-cli models/);
     assert.equal(harness.widgets.has("peer-dashboard"), true);
 
+    const nextNoticeBefore = harness.notifications.length;
     const nextMessages = await harness.run("peer", "list");
-    const nextText = nextMessages.map((entry) => String(entry.message.content ?? "")).join("\n");
+    assert.equal(nextMessages.length, 0);
+    const nextText = harness.notifications.slice(nextNoticeBefore).map((entry) => entry.message).join("\n");
     assert.doesNotMatch(nextText, /How to work with pi-ca-leash:/);
     assert.doesNotMatch(nextText, /Common commands:/);
   } finally {
@@ -287,8 +310,11 @@ test("compact peer widget adapts widths and hides redundant driver column", asyn
 test("/peer commands stay renderless in --no-session smoke mode", async () => {
   const harness = await loadCommandHarness({ defaultDriver: "codex-cli", noSession: true });
   try {
+    const noticeBefore = harness.notifications.length;
     const messages = await harness.run("peer", "models codex-cli");
-    assert.match(latestBody(messages), /codex-cli models/);
+    assert.equal(messages.length, 1);
+    assert.equal(messages.at(0)?.message?.details?.surface, "agent");
+    assert.match(notificationMatching(harness.notifications.slice(noticeBefore), /Runtime models/), /codex-cli models/);
     assert.equal(harness.widgets.has("peer-dashboard"), false);
     assert.equal(harness.statusUpdates.length, 0);
   } finally {
@@ -326,19 +352,19 @@ test("renderer, status, and widget use peer/pi-ca-leash branding", async () => {
     assert.equal(harness.renderers.has("peer-command-result"), true);
     assert.equal(harness.renderers.has("claude-command-result"), false);
 
-    const messages = await harness.run("peer", "list");
-    assert.equal(String(messages.at(-1)?.message?.customType), "peer-command-result");
-    assert.equal(messages.at(-1)?.message?.details?.surface, "custom");
-
     const renderer = harness.renderers.get("peer-command-result")!;
-    const listBox = renderer(messages.at(-1)?.message, { expanded: false }, {
+    const operatorBox = renderer({
+      customType: "peer-command-result",
+      content: "operator only",
+      details: { level: "info", title: "Peer dashboard", surface: "custom", timestamp: Date.now() },
+    }, { expanded: false }, {
       fg: (_color: string, text: string) => text,
       bg: (color: string, text: string) => `${color}:${text}`,
     });
-    const renderedText = String(listBox.children?.[0]?.text ?? "");
+    const renderedText = String(operatorBox.children?.[0]?.text ?? "");
     assert.match(renderedText, /^\[peer\]/);
     assert.doesNotMatch(renderedText, /\[cca\]|pi-claude-code-agent/);
-    assert.equal(listBox.args?.[2]?.("body"), "toolPendingBg:body");
+    assert.equal(operatorBox.args?.[2]?.("body"), "toolPendingBg:body");
 
     const initMessages = await harness.run("peer", "init");
     const guideMessage = initMessages.find((entry) => String(entry.message?.details?.title ?? "") === "Agent orchestration guide")?.message;
@@ -351,7 +377,8 @@ test("renderer, status, and widget use peer/pi-ca-leash branding", async () => {
     assert.equal(guideBox.args?.[2]?.("body"), "toolPendingBg:body");
 
     const startMessages = await harness.run("peer", "start reviewer | Review auth flow and reply briefly.");
-    assert.equal(startMessages.at(-1)?.message?.details?.surface, "tool");
+    assert.equal(startMessages.length, 0);
+    assert.match(latestNotification(harness.notifications), /Peer started: reviewer/);
 
     assert.equal(harness.statusUpdates.at(-1)?.name, "pi-ca-leash");
     assert.equal(harness.widgets.has("peer-dashboard"), true);
@@ -367,10 +394,13 @@ test("/peer start honors codex default and explicit driver forms", async () => {
     const started = Date.now();
     const startMessages = await defaultHarness.run("peer", "start" + " " + "Review auth flow and reply briefly.");
     assert.ok(Date.now() - started < 140, "/peer start should not wait for peer idle");
-    assert.match(latestBody(startMessages), /driver codex-cli/);
+    assert.equal(startMessages.length, 1);
+    assert.equal(startMessages.at(0)?.message?.details?.surface, "agent");
+    assert.match(latestNotification(defaultHarness.notifications), /driver codex-cli/);
 
     const listMessages = await defaultHarness.run("peer", "list");
-    assert.match(latestBody(listMessages), /codex-cli/);
+    assert.equal(listMessages.length, 0);
+    assert.match(latestNotification(defaultHarness.notifications), /codex-cli/);
   } finally {
     await defaultHarness.close();
   }
@@ -378,11 +408,14 @@ test("/peer start honors codex default and explicit driver forms", async () => {
   const overrideHarness = await loadCommandHarness({ defaultDriver: "claude-sdk" });
   try {
     const startMessages = await overrideHarness.run("peer", "start" + " " + "reviewer | Review auth flow and reply briefly. | codex-cli | gpt-5.4-mini");
-    assert.match(latestBody(startMessages), /driver codex-cli/);
-    assert.match(latestBody(startMessages), /gpt-5\.4-mini/);
+    assert.equal(startMessages.length, 1);
+    assert.equal(startMessages.at(0)?.message?.details?.surface, "agent");
+    assert.match(latestNotification(overrideHarness.notifications), /driver codex-cli/);
+    assert.match(latestNotification(overrideHarness.notifications), /gpt-5\.4-mini/);
 
     const listMessages = await overrideHarness.run("peer", "list");
-    assert.match(latestBody(listMessages), /codex-cli/);
+    assert.equal(listMessages.length, 0);
+    assert.match(latestNotification(overrideHarness.notifications), /codex-cli/);
   } finally {
     await overrideHarness.close();
   }
@@ -391,14 +424,20 @@ test("/peer start honors codex default and explicit driver forms", async () => {
 test("/peer models lists bundled runtime model catalog", async () => {
   const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
   try {
+    const allNoticeBefore = harness.notifications.length;
     const allMessages = await harness.run("peer", "models");
-    assert.match(latestBody(allMessages), /claude-sdk models/);
-    assert.match(latestBody(allMessages), /codex-cli models/);
+    assert.equal(allMessages.length, 1);
+    const allText = notificationMatching(harness.notifications.slice(allNoticeBefore), /Runtime models/);
+    assert.match(allText, /claude-sdk models/);
+    assert.match(allText, /codex-cli models/);
 
+    const codexNoticeBefore = harness.notifications.length;
     const codexMessages = await harness.run("peer", "models codex-cli");
-    assert.match(latestBody(codexMessages), /default gpt-5\.5/);
-    assert.match(latestBody(codexMessages), /gpt-5\.4-mini/);
-    assert.doesNotMatch(latestBody(codexMessages), /claude-opus-4-7/);
+    assert.equal(codexMessages.length, 0);
+    const codexText = notificationMatching(harness.notifications.slice(codexNoticeBefore), /Runtime models/);
+    assert.match(codexText, /default gpt-5\.5/);
+    assert.match(codexText, /gpt-5\.4-mini/);
+    assert.doesNotMatch(codexText, /claude-opus-4-7/);
   } finally {
     await harness.close();
   }
@@ -408,10 +447,12 @@ test("legacy advanced subagent commands honor codex default and explicit driver 
   const defaultHarness = await loadCommandHarness({ defaultDriver: "codex-cli", advanced: true, legacy: true });
   try {
     const runMessages = await defaultHarness.run("claude-subagent-run", "Reply with exactly: subagent-ok");
-    assert.match(latestBody(runMessages), /driver codex-cli/);
+    assert.equal(runMessages.length, 0);
+    assert.match(latestNotification(defaultHarness.notifications), /driver codex-cli/);
 
     const listMessages = await defaultHarness.run("claude-subagent-list", "");
-    assert.match(latestBody(listMessages), /codex-cli/);
+    assert.equal(listMessages.length, 0);
+    assert.match(latestNotification(defaultHarness.notifications), /codex-cli/);
   } finally {
     await defaultHarness.close();
   }
@@ -419,10 +460,12 @@ test("legacy advanced subagent commands honor codex default and explicit driver 
   const overrideHarness = await loadCommandHarness({ defaultDriver: "claude-sdk", advanced: true, legacy: true });
   try {
     const runMessages = await overrideHarness.run("claude-subagent-run", "codex-cli | Reply with exactly: subagent-ok");
-    assert.match(latestBody(runMessages), /driver codex-cli/);
+    assert.equal(runMessages.length, 0);
+    assert.match(latestNotification(overrideHarness.notifications), /driver codex-cli/);
 
     const listMessages = await overrideHarness.run("claude-subagent-list", "");
-    assert.match(latestBody(listMessages), /codex-cli/);
+    assert.equal(listMessages.length, 0);
+    assert.match(latestNotification(overrideHarness.notifications), /codex-cli/);
   } finally {
     await overrideHarness.close();
   }
@@ -432,10 +475,12 @@ test("legacy advanced team commands honor codex default and explicit driver form
   const defaultHarness = await loadCommandHarness({ defaultDriver: "codex-cli", advanced: true, legacy: true });
   try {
     const spawnMessages = await defaultHarness.run("claude-team-spawn", "worker | You are teammate. Reply briefly.");
-    assert.match(latestBody(spawnMessages), /driver codex-cli/);
+    assert.equal(spawnMessages.length, 0);
+    assert.match(latestNotification(defaultHarness.notifications), /driver codex-cli/);
 
     const listMessages = await defaultHarness.run("claude-team-list", "");
-    assert.match(latestBody(listMessages), /codex-cli/);
+    assert.equal(listMessages.length, 0);
+    assert.match(latestNotification(defaultHarness.notifications), /codex-cli/);
   } finally {
     await defaultHarness.close();
   }
@@ -443,10 +488,12 @@ test("legacy advanced team commands honor codex default and explicit driver form
   const overrideHarness = await loadCommandHarness({ defaultDriver: "claude-sdk", advanced: true, legacy: true });
   try {
     const spawnMessages = await overrideHarness.run("claude-team-spawn", "worker | You are teammate. Reply briefly. | codex-cli");
-    assert.match(latestBody(spawnMessages), /driver codex-cli/);
+    assert.equal(spawnMessages.length, 0);
+    assert.match(latestNotification(overrideHarness.notifications), /driver codex-cli/);
 
     const listMessages = await overrideHarness.run("claude-team-list", "");
-    assert.match(latestBody(listMessages), /codex-cli/);
+    assert.equal(listMessages.length, 0);
+    assert.match(latestNotification(overrideHarness.notifications), /codex-cli/);
   } finally {
     await overrideHarness.close();
   }
@@ -458,25 +505,33 @@ test("/peer dispatcher covers ask, send, history, interrupt, and stop", async ()
     await harness.run("peer", "start worker | You are a brief worker.");
 
     let listMessages = await harness.run("peer", "list");
-    for (let i = 0; i < 60 && /\b(busy|starting)\b/.test(latestBody(listMessages)); i += 1) {
+    let listText = latestNotification(harness.notifications);
+    for (let i = 0; i < 60 && /\b(busy|starting)\b/.test(listText); i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 50));
       listMessages = await harness.run("peer", "list");
+      assert.equal(listMessages.length, 0);
+      listText = latestNotification(harness.notifications);
     }
 
     const askMessages = await harness.run("peer", "ask worker | Reply with exactly: peer-ok");
-    assert.match(String(askMessages.at(-1)?.message?.details?.title ?? ""), /Peer reply: worker/);
+    assert.equal(askMessages.length, 0);
+    assert.match(latestNotification(harness.notifications), /Peer reply: worker/);
 
     const historyMessages = await harness.run("peer", "history worker 0 20");
-    assert.match(latestBody(historyMessages), /cursor .* of /);
+    assert.equal(historyMessages.length, 0);
+    assert.match(latestNotification(harness.notifications), /cursor .* of /);
 
     const sendMessages = await harness.run("peer", "send worker | Keep working and report back.");
-    assert.match(latestBody(sendMessages), /delivery delivered_and_running/);
+    assert.equal(sendMessages.length, 0);
+    assert.match(latestNotification(harness.notifications), /delivery delivered_and_running/);
 
     const interruptMessages = await harness.run("peer", "interrupt worker");
-    assert.match(String(interruptMessages.at(-1)?.message?.details?.title ?? ""), /Peer interrupted: worker/);
+    assert.equal(interruptMessages.length, 0);
+    assert.match(latestNotification(harness.notifications), /Peer interrupted: worker/);
 
     const stopMessages = await harness.run("peer", "stop worker");
-    assert.match(String(stopMessages.at(-1)?.message?.details?.title ?? ""), /Peer stopped: worker/);
+    assert.equal(stopMessages.length, 0);
+    assert.match(latestNotification(harness.notifications), /Peer stopped: worker/);
   } finally {
     await harness.close();
   }
@@ -489,13 +544,16 @@ test("/peer stop --all requires confirmation and clears peer list", async () => 
     await harness.run("peer", "start" + " " + "tester | Verify login flow | codex-cli");
 
     const usageMessages = await harness.run("peer", "stop --all");
-    assert.match(latestBody(usageMessages), /\/peer stop --all --confirm/);
+    assert.equal(usageMessages.length, 0);
+    assert.match(latestNotification(harness.notifications), /\/peer stop --all --confirm/);
 
     const stopMessages = await harness.run("peer", "stop --all --confirm");
-    assert.match(latestBody(stopMessages), /reviewer|tester/);
+    assert.equal(stopMessages.length, 0);
+    assert.match(latestNotification(harness.notifications), /reviewer|tester/);
 
     const listMessages = await harness.run("peer", "list");
-    assert.match(latestBody(listMessages), /No peers yet\./);
+    assert.equal(listMessages.length, 0);
+    assert.match(latestNotification(harness.notifications), /No peers yet\./);
   } finally {
     await harness.close();
   }

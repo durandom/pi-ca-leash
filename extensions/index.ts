@@ -139,6 +139,7 @@ interface ExtensionLogEntryInput {
 }
 
 let dashboardContextRef: ExtensionContext | ExtensionCommandContext | undefined;
+let operatorContextRef: ExtensionContext | ExtensionCommandContext | undefined;
 let lastWidgetSignature: string | undefined;
 
 export default async function piCaLeashExtension(pi: ExtensionAPI) {
@@ -874,7 +875,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           type: "text",
           text: [
             deliveredAndRunning ? `Peer message delivered: ${name}` : `Peer reply: ${name}`,
-            "sent prompt shown above in the chat",
+            "sent prompt shown in an operator notification",
             deliveredAndRunning ? "delivery delivered_and_running" : undefined,
             deliveredAndRunning ? "do not poll; wait for automated peer update" : undefined,
             `state ${row.state}`,
@@ -1485,6 +1486,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
 
   pi.on("session_shutdown", async () => {
     dashboardContextRef = undefined;
+    operatorContextRef = undefined;
     lastWidgetSignature = undefined;
     peerRelaySnapshots.clear();
     suppressNextPeerRelay.clear();
@@ -2278,6 +2280,8 @@ function registerExtensionCommand(
     description,
     getArgumentCompletions,
     handler: async (args, ctx) => {
+      const previousOperatorContext = operatorContextRef;
+      operatorContextRef = ctx;
       try {
         await handler(args, ctx);
       } catch (error) {
@@ -2288,7 +2292,8 @@ function registerExtensionCommand(
           title: `/${name} failed`,
           body: message,
         });
-        ctx.ui.notify(message, "error");
+      } finally {
+        operatorContextRef = previousOperatorContext;
       }
     },
   });
@@ -2298,6 +2303,14 @@ function sendCommandMessage(
   pi: ExtensionAPI,
   input: { level: CommandMessageLevel; title: string; body?: string; command?: string; surface?: CommandMessageSurface },
 ): void {
+  if (input.surface !== "agent") {
+    const ctx = operatorContextRef ?? dashboardContextRef;
+    if (ctx) {
+      ctx.ui.notify(formatOperatorNotification(input), notifyLevel(input.level));
+    }
+    return;
+  }
+
   pi.sendMessage(
     {
       customType: "peer-command-result",
@@ -2313,6 +2326,27 @@ function sendCommandMessage(
     },
     { triggerTurn: false },
   );
+}
+
+function formatOperatorNotification(input: { title: string; body?: string; command?: string }): string {
+  const parts = [`[peer] ${input.title}`];
+  if (input.body?.trim()) {
+    parts.push(input.body.trim());
+  }
+  if (input.command) {
+    parts.push(`/${input.command}`);
+  }
+  return parts.join("\n\n");
+}
+
+function notifyLevel(level: CommandMessageLevel): "info" | "warning" | "error" {
+  if (level === "error") {
+    return "error";
+  }
+  if (level === "warning") {
+    return "warning";
+  }
+  return "info";
 }
 
 function showUsage(pi: ExtensionAPI, command: string, usage: string): void {
