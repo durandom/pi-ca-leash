@@ -14,7 +14,12 @@ export interface NormalizedDriverUsage {
   outputTokens?: number;
   cacheCreationInputTokens?: number;
   cacheReadInputTokens?: number;
+  reasoningOutputTokens?: number;
   totalCostUsd?: number;
+  contextTokens?: number;
+  contextWindow?: number;
+  contextPercentage?: number;
+  maxOutputTokens?: number;
   raw?: unknown;
 }
 

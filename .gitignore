@@ -5,5 +5,11 @@ coverage/
 .DS_Store
 .pi/
 .pi-claude-code-agent/
+.pi-ca-leash/
 .claude-runtime/
 packages/runtime/.claude-runtime/
+packages/intercom-bridge/.claude-intercom-bridge/
+packages/subagents-backend/.subagent-runs/
+packages/teams-backend/.claude-intercom-bridge/
+packages/teams-backend/.teams-backend/
+undefined/

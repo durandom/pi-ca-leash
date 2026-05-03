@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Agent guidance for working in `pi-claude-code-agent`.
+Agent guidance for working in `pi-ca-leash`.
 
 ## Mission
 

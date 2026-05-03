@@ -134,6 +134,71 @@ class FakeDriver implements RuntimeDriver {
   }
 }
 
+class SlowDriver implements RuntimeDriver {
+  readonly name = "claude-sdk" as const;
+
+  run(input: RuntimeDriverRunInput, onEvent: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+    let interrupted = false;
+    const done = (async () => {
+      await onEvent({
+        type: "message",
+        payload: {
+          type: "system",
+          subtype: "init",
+          sessionId: input.resumeSessionId ?? input.sessionId,
+          model: input.model ?? "fake-model",
+          raw: { type: "system", subtype: "init", session_id: input.resumeSessionId ?? input.sessionId, model: input.model ?? "fake-model" },
+        },
+      });
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      if (!interrupted) {
+        await onEvent({
+          type: "message",
+          payload: {
+            type: "assistant",
+            blocks: [{ type: "text", text: `reply:${input.prompt}`, raw: { type: "text", text: `reply:${input.prompt}` } }],
+            raw: { type: "assistant", message: { content: [{ type: "text", text: `reply:${input.prompt}` }] } },
+          },
+        });
+        await onEvent({
+          type: "message",
+          payload: {
+            type: "result",
+            ok: true,
+            summary: `done:${input.prompt}`,
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 2, raw: { input_tokens: 1, output_tokens: 2 } },
+            raw: {
+              type: "result",
+              is_error: false,
+              result: `done:${input.prompt}`,
+              stop_reason: "end_turn",
+              usage: { input_tokens: 1, output_tokens: 2 },
+            },
+          },
+        });
+      }
+      return { code: interrupted ? 130 : 0, signal: interrupted ? "SIGINT" : null } as const;
+    })();
+
+    return {
+      kill() {
+        interrupted = true;
+      },
+      done,
+    };
+  }
+}
+
+class SlowResumeDriver extends FakeDriver {
+  override run(input: RuntimeDriverRunInput, onEvent: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+    if (!input.resumeSessionId) {
+      return super.run(input, onEvent);
+    }
+    return new SlowDriver().run(input, onEvent);
+  }
+}
+
 class FakeTransport implements BridgeTransport {
   readonly registrations = new Map<string, { onMessage: (message: BridgeTransportIncomingMessage) => Promise<void> | void }>();
   readonly sent: Array<{ peerName: string; to: string; message: BridgeTransportOutgoingMessage }> = [];
@@ -192,6 +257,61 @@ test("launch registers peer and ask waits for idle-cycle reply", async () => {
   assert.equal(driver.runs[0]?.model, "model-a");
   assert.equal(driver.runs[1]?.model, "model-b");
   assert.equal(driver.runs[2]?.model, "model-b");
+});
+
+test("launch can return before idle when requested", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir, driver: new SlowDriver() });
+  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, pollIntervalMs: 5, askTimeoutMs: 20 });
+
+  const started = Date.now();
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", waitForIdle: false });
+  assert.ok(Date.now() - started < 60);
+  assert.ok(["starting", "busy", "idle"].includes(peer.state));
+
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  const settled = await bridge.status("worker");
+  assert.equal(settled?.state, "idle");
+});
+
+test("ask timeout returns delivered_and_running instead of throwing after delivery", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir, driver: new SlowResumeDriver() });
+  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, pollIntervalMs: 5, askTimeoutMs: 10 });
+
+  await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+  const result = await bridge.ask("worker", { from: "planner", text: "slow follow-up" });
+
+  assert.equal(result.deliveryState, "delivered_and_running");
+  assert.equal(result.reply, "");
+  assert.equal(result.peer.state, "busy");
+});
+
+test("send can deliver fire-and-forget without waiting for idle", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir, driver: new SlowResumeDriver() });
+  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, pollIntervalMs: 5, askTimeoutMs: 10 });
+
+  await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+  const started = Date.now();
+  const peer = await bridge.send("worker", { from: "planner", text: "slow send" }, { waitForIdle: false });
+
+  assert.ok(Date.now() - started < 60);
+  assert.equal(peer.state, "busy");
+});
+
+test("interrupt signals a busy peer and keeps it registered", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir, driver: new SlowResumeDriver() });
+  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, pollIntervalMs: 5, askTimeoutMs: 10 });
+
+  await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+  await bridge.send("worker", { from: "planner", text: "slow send" }, { waitForIdle: false });
+  const interrupted = await bridge.interrupt("worker");
+
+  assert.equal(interrupted.name, "worker");
+  assert.equal(["busy", "interrupted"].includes(interrupted.state), true);
+  assert.ok(await bridge.status("worker"));
 });
 
 test("send and reply both route through runtime send", async () => {

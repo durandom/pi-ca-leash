@@ -40,10 +40,24 @@ test("parseClaudeSdkMessage maps tool results, result metadata, and stream event
   assert.equal(toolResult?.type === "tool_result" ? toolResult.toolName : undefined, "Bash");
   assert.equal(toolResult?.type === "tool_result" ? toolResult.toolUseId : undefined, "tool-1");
 
-  const [result] = parseClaudeSdkMessage({ type: "result", result: "done", session_id: "sid-1", is_error: false, duration_ms: 12, total_cost_usd: 0.34, num_turns: 2, usage: { input_tokens: 1 } });
+  const [result] = parseClaudeSdkMessage({
+    type: "result",
+    result: "done",
+    session_id: "sid-1",
+    is_error: false,
+    duration_ms: 12,
+    total_cost_usd: 0.34,
+    num_turns: 2,
+    usage: { input_tokens: 1, cache_creation_input_tokens: 2, cache_read_input_tokens: 3 },
+    modelUsage: { "claude-sonnet-4-6": { contextWindow: 200_000, maxOutputTokens: 64_000 } },
+  });
   assert.equal(result?.type, "result");
   assert.equal(result?.type === "result" ? result.usage?.totalCostUsd : undefined, 0.34);
   assert.equal(result?.type === "result" ? result.usage?.inputTokens : undefined, 1);
+  assert.equal(result?.type === "result" ? result.usage?.contextTokens : undefined, 6);
+  assert.equal(result?.type === "result" ? result.usage?.contextWindow : undefined, 200_000);
+  assert.equal(result?.type === "result" ? result.usage?.contextPercentage : undefined, 0);
+  assert.equal(result?.type === "result" ? result.usage?.maxOutputTokens : undefined, 64_000);
 
   const [event] = parseClaudeSdkMessage({ type: "task_notification", session_id: "sid-1", summary: "working" });
   assert.equal(event?.type, "stream_event");

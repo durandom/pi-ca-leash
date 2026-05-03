@@ -62,6 +62,28 @@ export function shouldRebindTransport(status: BridgeTransportStatus | undefined)
   return status.boundPeers > status.connectedPeers;
 }
 
+export function shouldSkipBackgroundRefresh(state: DashboardState, now: number, minIntervalMs: number): boolean {
+  return (now - state.lastRefreshedAt) < minIntervalMs;
+}
+
+export interface WidgetSignatureInput {
+  peerRows: Array<{
+    name: string;
+    state: string;
+    activity: string;
+    lastUpdateAt?: string;
+    model?: string;
+    contextPercentage?: number;
+  }>;
+  transportDegraded: boolean;
+  lastEvent: string;
+}
+
+// Stable string fingerprint of visible widget content.
+export function computeWidgetSignature(input: WidgetSignatureInput): string {
+  return JSON.stringify(input);
+}
+
 export function createAttentionLedger(): AttentionLedger {
   return { runs: {} };
 }

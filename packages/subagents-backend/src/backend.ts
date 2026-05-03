@@ -83,6 +83,7 @@ export class ClaudeCodeSubagentBackend implements SubagentBackend {
       runner: this.runner,
       agentName: input.agent.name,
       cwd,
+      driver: input.driver,
       model: input.model ?? input.agent.model,
       state: input.async ? "queued" : "starting",
       context: input.context ?? "fresh",
@@ -97,6 +98,7 @@ export class ClaudeCodeSubagentBackend implements SubagentBackend {
 
     const session = await this.runtime.start({
       prompt: buildTaskPrompt(input.agent.prompt, input.task),
+      driver: input.driver,
       cwd,
       model: input.model ?? input.agent.model,
       name: input.agent.name,
@@ -106,6 +108,7 @@ export class ClaudeCodeSubagentBackend implements SubagentBackend {
     await writeRunState(this.storageDir, {
       ...queued,
       sessionId: session.sessionId,
+      driver: session.driver ?? queued.driver,
       model: session.model ?? queued.model,
       state: mapRunState(session.state),
       updatedAt: new Date().toISOString(),
@@ -211,6 +214,7 @@ export class ClaudeCodeSubagentBackend implements SubagentBackend {
     const next: SubagentRunRecord = {
       ...current,
       sessionId: finalStatus?.sessionId ?? current.sessionId,
+      driver: finalStatus?.driver ?? current.driver,
       model: finalStatus?.model ?? current.model,
       state: mapRunState(finalStatus?.state ?? current.state),
       updatedAt: new Date().toISOString(),
@@ -256,7 +260,11 @@ export class ClaudeCodeSubagentBackend implements SubagentBackend {
       if (run.sessionId) {
         this.sessionToRunId.set(run.sessionId, run.runId);
       }
-      if (!run.sessionId || !["queued", "starting", "running", "idle"].includes(run.state)) {
+      if (!run.sessionId) {
+        return;
+      }
+      const shouldSync = run.driver == null || ["queued", "starting", "running", "idle"].includes(run.state);
+      if (!shouldSync) {
         return;
       }
       const status = await this.runtime.status(run.sessionId);

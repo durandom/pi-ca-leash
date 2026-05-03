@@ -2,7 +2,7 @@
 
 ## Overview
 
-`pi-claude-code-agent` is built around one idea:
+`pi-ca-leash` is built around one idea:
 
 > Claude Code should be integrated as a **stateful runtime** first, then adapted into pi-style workflows.
 
@@ -59,7 +59,9 @@ Responsibility:
 Important consequence:
 - intercom transport is optional
 - the bridge still works locally without live broker presence
-- peers may now be runtime-backed by different drivers even though the extension UX is still Claude-first
+- peers may now be runtime-backed by different drivers
+- extension startup can choose the default peer driver via `PI_CLAUDE_RUNTIME_DRIVER`
+- the default extension UX still has no per-peer driver selection
 
 ### 3. Subagent backend layer
 
@@ -75,6 +77,7 @@ Responsibility:
 
 Truth:
 - this is local backend logic in this repo
+- backend API can thread runtime driver selection into runs
 - it is not proof of real upstream `pi-subagents` product integration
 - `context: fork` is rejected explicitly
 
@@ -92,6 +95,7 @@ Responsibility:
 
 Truth:
 - this is a local teams backend only
+- backend API can thread runtime driver selection into teammate spawn
 - no external `pi-teams` integration is assumed here
 
 ### 5. Extension layer
@@ -102,8 +106,9 @@ Path:
 Responsibility:
 - wire runtime + bridge + backends into a pi extension
 - expose operator commands
-- render dashboard/status information
-- monitor live intercom transport connectivity
+- render peer-first widget/dashboard surfaces
+- keep retained backend diagnostics behind explicit advanced views
+- monitor live broker transport connectivity
 - surface attention notifications
 - persist local attention ack/snooze state
 
@@ -126,13 +131,13 @@ So this repo chooses:
 Repository-local state is written under:
 
 ```text
-.pi-claude-code-agent/
+.pi-ca-leash/
 ```
 
 Typical layout:
 
 ```text
-.pi-claude-code-agent/
+.pi-ca-leash/
   runtime/      # runtime sessions and transcripts
   bridge/       # bridge peer registry
   subagents/    # subagent run artifacts
@@ -147,11 +152,13 @@ Typical layout:
 ```text
 user command
   → extension
+  → immediate acknowledgment in main window
   → intercom bridge
   → runtime session send
   → wait for idle cycle
   → reply extraction
-  → command result / dashboard update
+  → peer-first dashboard/widget update
+  → final command result
 ```
 
 ### Subagent flow

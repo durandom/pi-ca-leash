@@ -68,7 +68,9 @@ export class ClaudeRuntimeIntercomBridge {
     this.peers.set(peer.name, peer);
     await this.rememberPeer(peer.name, peer.sessionId);
     await this.registerTransportPeer(peer.name);
-    await this.waitForTerminalState(peer.sessionId);
+    if (input.waitForIdle !== false) {
+      await this.waitForTerminalState(peer.sessionId);
+    }
     return this.syncPeerFromRuntime(peer.name);
   }
 
@@ -97,26 +99,34 @@ export class ClaudeRuntimeIntercomBridge {
     return this.syncPeerFromRuntime(name);
   }
 
-  async send(name: string, message: Omit<IntercomInboundMessage, "kind">): Promise<BridgePeer> {
-    const result = await this.deliver(name, { ...message, kind: "send" });
+  async send(name: string, message: Omit<IntercomInboundMessage, "kind">, options: { waitForIdle?: boolean } = {}): Promise<BridgePeer> {
+    const result = await this.deliver(name, { ...message, kind: "send" }, { waitForIdle: options.waitForIdle ?? true });
     return result.peer;
   }
 
   async ask(name: string, message: Omit<IntercomInboundMessage, "kind">): Promise<AskResult> {
-    return this.deliver(name, { ...message, kind: "ask" });
+    return this.deliver(name, { ...message, kind: "ask" }, { waitForIdle: true });
   }
 
   async reply(name: string, message: Omit<IntercomInboundMessage, "kind">): Promise<BridgePeer> {
-    const result = await this.deliver(name, { ...message, kind: "reply" });
+    const result = await this.deliver(name, { ...message, kind: "reply" }, { waitForIdle: true });
     return result.peer;
+  }
+
+  async interrupt(name: string): Promise<BridgePeer> {
+    const peer = this.requirePeer(name);
+    await this.runtime.interrupt(peer.sessionId);
+    return this.syncPeerFromRuntime(name);
   }
 
   async stop(name: string): Promise<BridgePeer> {
     const peer = this.requirePeer(name);
-    await this.runtime.stop(peer.sessionId);
+    const status = await this.runtime.stop(peer.sessionId);
+    const stopped = this.peerFromStatus(name, status, mapRuntimeState(status.state, true));
     await this.forgetPeer(name);
     await this.unregisterTransportPeer(name);
-    return this.syncPeerFromRuntime(name);
+    this.peers.delete(name);
+    return stopped;
   }
 
   async disconnect(name: string): Promise<BridgePeer> {
@@ -188,10 +198,10 @@ export class ClaudeRuntimeIntercomBridge {
     await this.transport?.close?.();
   }
 
-  private async deliver(name: string, inbound: IntercomInboundMessage): Promise<AskResult> {
+  private async deliver(name: string, inbound: IntercomInboundMessage, options: { waitForIdle: boolean }): Promise<AskResult> {
     const peer = await this.syncPeerFromRuntime(name);
     if (["busy", "starting"].includes(peer.state)) {
-      throw new Error(`Peer ${name} busy`);
+      throw new Error(`Peer ${name} busy. Message was not delivered. Use fire-and-forget send only after the peer is idle or wait for the automated peer update.`);
     }
     if (["stopped", "disconnected"].includes(peer.state)) {
       throw new Error(`Peer ${name} unavailable (${peer.state})`);
@@ -199,20 +209,50 @@ export class ClaudeRuntimeIntercomBridge {
 
     const before = await this.runtime.events(peer.sessionId);
     const cursor = before.nextCursor;
-    await this.runtime.send({
+    const sentStatus = await this.runtime.send({
       sessionId: peer.sessionId,
       message: formatInboundMessage(inbound),
+      model: inbound.model,
     });
 
-    const status = await this.waitForTerminalState(peer.sessionId, inbound.timeoutMs ?? this.askTimeoutMs);
+    if (!options.waitForIdle) {
+      const syncedPeer = await this.syncPeerFromRuntime(name);
+      return {
+        peer: syncedPeer,
+        reply: "",
+        runState: sentStatus.state,
+        events: [],
+        deliveryState: "delivered_and_running",
+      };
+    }
+
+    const waited = await this.waitForTerminalStateOrCurrent(peer.sessionId, inbound.timeoutMs ?? this.askTimeoutMs);
     const chunk = await this.runtime.events(peer.sessionId, cursor);
     const syncedPeer = await this.syncPeerFromRuntime(name);
     return {
       peer: syncedPeer,
-      reply: extractReplyText(chunk.items),
-      runState: status.state,
+      reply: waited.timedOut ? "" : extractReplyText(chunk.items),
+      runState: waited.status.state,
       events: chunk.items,
+      deliveryState: waited.timedOut ? "delivered_and_running" : "completed",
     };
+  }
+
+  private async waitForTerminalStateOrCurrent(sessionId: RuntimeSessionId, timeoutMs = this.askTimeoutMs): Promise<{ status: RuntimeStatus; timedOut: boolean }> {
+    const started = Date.now();
+    for (;;) {
+      const status = await this.runtime.status(sessionId);
+      if (!status) {
+        throw new Error(`Unknown runtime session ${sessionId}`);
+      }
+      if (["idle", "interrupted", "failed", "stopped"].includes(status.state)) {
+        return { status, timedOut: false };
+      }
+      if (Date.now() - started > timeoutMs) {
+        return { status, timedOut: true };
+      }
+      await delay(this.pollIntervalMs);
+    }
   }
 
   private async waitForTerminalState(sessionId: RuntimeSessionId, timeoutMs = this.askTimeoutMs): Promise<RuntimeStatus> {
@@ -256,8 +296,8 @@ export class ClaudeRuntimeIntercomBridge {
       name,
       sessionId: status.sessionId,
       cwd: status.cwd,
-      driver: status.driver,
       model: status.model,
+      driver: status.driver,
       state,
       createdAt: status.createdAt,
       updatedAt: status.updatedAt,
@@ -289,7 +329,7 @@ export class ClaudeRuntimeIntercomBridge {
 
     if (message.expectsReply) {
       try {
-        const result = await this.deliver(name, inbound);
+        const result = await this.deliver(name, inbound, { waitForIdle: true });
         await this.transport?.sendFromPeer(name, message.from.id, {
           text: result.reply,
           replyTo: message.id,
@@ -303,7 +343,7 @@ export class ClaudeRuntimeIntercomBridge {
       return;
     }
 
-    await this.deliver(name, inbound);
+    await this.deliver(name, inbound, { waitForIdle: false });
   }
 
   private async rememberPeer(name: string, sessionId: string): Promise<void> {
@@ -355,7 +395,7 @@ function extractReplyText(events: RuntimeEvent[]): string {
   const assistantBlocks = events
     .filter((event): event is Extract<RuntimeEvent, { type: "message" }> => event.type === "message" && event.role === "assistant")
     .flatMap((event) => event.message.blocks)
-    .map(blockToText)
+    .map(blockToVisibleText)
     .filter((value): value is string => Boolean(value && value.trim()));
 
   if (assistantBlocks.length > 0) {
@@ -368,14 +408,31 @@ function extractReplyText(events: RuntimeEvent[]): string {
   return result?.summary ?? "";
 }
 
-function blockToText(block: RuntimeMessageBlock): string | undefined {
-  if (typeof block.text === "string") {
-    return block.text;
+function extractLatestReplyText(events: RuntimeEvent[]): string {
+  const latestAssistantMessage = [...events]
+    .reverse()
+    .find((event): event is Extract<RuntimeEvent, { type: "message" }> => event.type === "message" && event.role === "assistant"
+      && event.message.blocks.some((block) => Boolean(blockToVisibleText(block)?.trim())));
+
+  if (latestAssistantMessage) {
+    return latestAssistantMessage.message.blocks
+      .map(blockToVisibleText)
+      .filter((value): value is string => Boolean(value && value.trim()))
+      .join("\n\n")
+      .trim();
   }
-  if (block.type === "thinking" && typeof (block.raw as { thinking?: unknown } | undefined)?.thinking === "string") {
-    return String((block.raw as { thinking: string }).thinking);
+
+  const result = [...events]
+    .reverse()
+    .find((event): event is Extract<RuntimeEvent, { type: "result" }> => event.type === "result");
+  return result?.summary ?? "";
+}
+
+function blockToVisibleText(block: RuntimeMessageBlock): string | undefined {
+  if (block.type === "thinking") {
+    return undefined;
   }
-  return undefined;
+  return typeof block.text === "string" ? block.text : undefined;
 }
 
 function mapRuntimeState(state: RuntimeStatus["state"], registered: boolean): BridgeState {
@@ -412,4 +469,4 @@ function formatTransportInboundText(message: BridgeTransportIncomingMessage): st
   return attachmentText ? `${message.text}\n\n${attachmentText}` : message.text;
 }
 
-export { BRIDGE_SYSTEM_PROMPT, extractReplyText, formatInboundMessage, formatTransportInboundText, mapRuntimeState };
+export { BRIDGE_SYSTEM_PROMPT, extractLatestReplyText, extractReplyText, formatInboundMessage, formatTransportInboundText, mapRuntimeState };

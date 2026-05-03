@@ -19,12 +19,12 @@ import type { DriverEventEnvelope } from "../src/types.js";
 
 test("buildCodexCliCommand — fresh run", () => {
   const args = buildCodexCliCommand({ prompt: "hello", cwd: "/work" });
-  assert.deepEqual(args, ["exec", "hello", "--json", "--full-auto", "-C", "/work"]);
+  assert.deepEqual(args, ["exec", "--json", "--full-auto", "-C", "/work", "hello"]);
 });
 
 test("buildCodexCliCommand — resume run", () => {
   const args = buildCodexCliCommand({ prompt: "continue", cwd: "/work", resumeSessionId: "sid-abc" });
-  assert.deepEqual(args, ["exec", "resume", "sid-abc", "continue", "--json", "--full-auto", "-C", "/work"]);
+  assert.deepEqual(args, ["exec", "resume", "--json", "--full-auto", "sid-abc", "continue"]);
 });
 
 test("buildCodexCliCommand — model and appendSystemPrompt", () => {
@@ -35,7 +35,7 @@ test("buildCodexCliCommand — model and appendSystemPrompt", () => {
     appendSystemPrompt: "Be brief.",
   });
   assert.equal(args[0], "exec");
-  assert.ok(args[1]?.startsWith("<system>\nBe brief.\n</system>\n\ntask"), "prompt should have system prefix");
+  assert.equal(args.at(-1)?.startsWith("<system>\nBe brief.\n</system>\n\ntask"), true, "prompt should have system prefix");
   assert.ok(args.includes("-m"), "should include -m flag");
   assert.equal(args[args.indexOf("-m") + 1], "o4-mini");
 });
@@ -44,11 +44,12 @@ test("buildCodexCliCommand — model and appendSystemPrompt", () => {
 // parseCodexCliEvent
 // ---------------------------------------------------------------------------
 
-test("parseCodexCliEvent — thread.started → system init with sessionId", () => {
-  const msg = parseCodexCliEvent({ type: "thread.started", thread_id: "t-123" });
+test("parseCodexCliEvent — thread.started → system init with sessionId and model when reported", () => {
+  const msg = parseCodexCliEvent({ type: "thread.started", thread_id: "t-123", model: "gpt-5-codex" });
   assert.equal(msg?.type, "system");
   assert.equal(msg?.type === "system" ? msg.subtype : undefined, "init");
   assert.equal(msg?.type === "system" ? msg.sessionId : undefined, "t-123");
+  assert.equal(msg?.type === "system" ? msg.model : undefined, "gpt-5-codex");
 });
 
 test("parseCodexCliEvent — item.started command_execution → tool_use", () => {
@@ -84,13 +85,15 @@ test("parseCodexCliEvent — turn.completed → result ok with usage", () => {
   const msg = parseCodexCliEvent({
     type: "turn.completed",
     summary: "Finished",
-    usage: { input_tokens: 10, output_tokens: 5 },
+    usage: { input_tokens: 10, cached_input_tokens: 7, output_tokens: 5, reasoning_output_tokens: 2 },
   });
   assert.equal(msg?.type, "result");
   assert.equal(msg?.type === "result" ? msg.ok : undefined, true);
   assert.equal(msg?.type === "result" ? msg.summary : undefined, "Finished");
   assert.equal(msg?.type === "result" ? msg.usage?.inputTokens : undefined, 10);
+  assert.equal(msg?.type === "result" ? msg.usage?.cacheReadInputTokens : undefined, 7);
   assert.equal(msg?.type === "result" ? msg.usage?.outputTokens : undefined, 5);
+  assert.equal(msg?.type === "result" ? msg.usage?.reasoningOutputTokens : undefined, 2);
 });
 
 test("parseCodexCliEvent — error event → null (driver wraps as error envelope)", () => {

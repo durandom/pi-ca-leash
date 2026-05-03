@@ -2,9 +2,12 @@ export type TeammateBackend = "claude-code-agent";
 export type TeamTaskState = "todo" | "assigned" | "in_progress" | "done" | "blocked" | "cancelled";
 export type TeammateState = "starting" | "idle" | "busy" | "interrupted" | "stopped" | "errored" | "disconnected";
 
+import type { RuntimeDriverName } from "@pi-claude-code-agent/runtime";
+
 export interface SpawnTeammateInput {
   name: string;
   prompt: string;
+  driver?: RuntimeDriverName;
   cwd?: string;
   model?: string;
 }
@@ -26,6 +29,7 @@ export interface TeammateRecord {
   sessionId?: string;
   state: TeammateState;
   cwd: string;
+  driver?: RuntimeDriverName;
   model?: string;
   createdAt: string;
   updatedAt: string;

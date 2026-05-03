@@ -36,13 +36,19 @@ export function buildCodexCliCommand(input: {
 
   const args: string[] = ["exec"];
   if (input.resumeSessionId) {
-    args.push("resume", input.resumeSessionId);
+    args.push("resume", "--json", "--full-auto");
+    if (input.model) {
+      args.push("-m", input.model);
+    }
+    args.push(input.resumeSessionId, effectivePrompt);
+    return args;
   }
-  args.push(effectivePrompt);
+
   args.push("--json", "--full-auto", "-C", input.cwd);
   if (input.model) {
     args.push("-m", input.model);
   }
+  args.push(effectivePrompt);
   return args;
 }
 
@@ -55,7 +61,13 @@ function toUsage(usage: unknown): NormalizedDriverUsage | undefined {
     cacheCreationInputTokens:
       typeof u.cache_creation_input_tokens === "number" ? u.cache_creation_input_tokens : undefined,
     cacheReadInputTokens:
-      typeof u.cache_read_input_tokens === "number" ? u.cache_read_input_tokens : undefined,
+      typeof u.cache_read_input_tokens === "number"
+        ? u.cache_read_input_tokens
+        : typeof u.cached_input_tokens === "number"
+          ? u.cached_input_tokens
+          : undefined,
+    reasoningOutputTokens:
+      typeof u.reasoning_output_tokens === "number" ? u.reasoning_output_tokens : undefined,
     raw: usage,
   };
 }
@@ -76,6 +88,7 @@ export function parseCodexCliEvent(event: unknown): NormalizedDriverMessage | nu
       type: "system",
       subtype: "init",
       sessionId,
+      model: typeof e.model === "string" ? e.model : typeof e.model_id === "string" ? e.model_id : undefined,
       raw: event,
     } satisfies SystemDriverMessage;
   }

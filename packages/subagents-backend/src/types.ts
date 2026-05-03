@@ -1,5 +1,6 @@
 import type {
   ClaudeCodeRuntime,
+  RuntimeDriverName,
   RuntimeEvent,
   RuntimeSessionId,
   RuntimeSessionState,
@@ -29,6 +30,7 @@ export interface SubagentDefinition {
 export interface StartRunInput {
   agent: SubagentDefinition;
   task: string;
+  driver?: RuntimeDriverName;
   cwd?: string;
   model?: string;
   async?: boolean;
@@ -47,6 +49,7 @@ export interface SubagentRunRecord {
   agentName: string;
   sessionId?: RuntimeSessionId;
   cwd: string;
+  driver?: RuntimeDriverName;
   model?: string;
   state: SubagentRunState;
   context: SubagentContextMode;

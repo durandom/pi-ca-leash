@@ -2,6 +2,7 @@ export { ClaudeRuntimeIntercomBridge } from "./bridge.js";
 export { PiIntercomTransport } from "./pi-intercom-transport.js";
 export {
   BRIDGE_SYSTEM_PROMPT,
+  extractLatestReplyText,
   extractReplyText,
   formatInboundMessage,
   formatTransportInboundText,
@@ -25,6 +26,7 @@ export type {
   BridgeTransportOutgoingMessage,
   BridgeTransportSessionInfo,
   BridgeTransportStatus,
+  DeliveryState,
   IntercomInboundMessage,
   IntercomMessageKind,
   LaunchPeerInput,

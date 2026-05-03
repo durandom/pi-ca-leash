@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { setTimeout as delay } from "node:timers/promises";
+import { resolveRuntimeDriverFromEnv } from "./driver-config.js";
 import { ClaudeCodeRuntime } from "./runtime.js";
 
-const runtime = new ClaudeCodeRuntime();
+const runtime = new ClaudeCodeRuntime({ defaultDriver: resolveRuntimeDriverFromEnv() });
 const prompt = process.argv.slice(2).join(" ") || "Reply with exactly: smoke-ok";
 
 const session = await runtime.start({

@@ -205,6 +205,30 @@ test("start persists state, transcript, and explicit driver identity", async () 
   assert.equal(transcript.items.some((item) => item.type === "result"), true);
 });
 
+test("defaultDriver codex-cli resolves built-in driver without explicit injection", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-runtime-test-"));
+  const previousExecutable = process.env.CODEX_CLI_EXECUTABLE;
+  process.env.CODEX_CLI_EXECUTABLE = "/definitely-missing/codex";
+
+  try {
+    const runtime = new ClaudeCodeRuntime({ storageDir, defaultDriver: "codex-cli" });
+    const session = await runtime.start({ prompt: "hello", cwd: "/tmp" });
+
+    assert.equal(session.driver, "codex-cli");
+    await waitForState(runtime, session.sessionId, "failed");
+
+    const status = await runtime.status(session.sessionId);
+    assert.equal(status?.driver, "codex-cli");
+    assert.match(status?.lastError?.message ?? "", /ENOENT|spawn/i);
+  } finally {
+    if (previousExecutable == null) {
+      delete process.env.CODEX_CLI_EXECUTABLE;
+    } else {
+      process.env.CODEX_CLI_EXECUTABLE = previousExecutable;
+    }
+  }
+});
+
 test("send reuses persisted driver session id", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-runtime-test-"));
   const driver = new RemappedSessionDriver();

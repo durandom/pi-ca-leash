@@ -42,6 +42,7 @@ export interface LaunchPeerInput {
   tools?: string[];
   additionalDirectories?: string[];
   env?: Record<string, string>;
+  waitForIdle?: boolean;
 }
 
 export interface AttachPeerInput {
@@ -55,13 +56,17 @@ export interface IntercomInboundMessage {
   text: string;
   replyTo?: string;
   timeoutMs?: number;
+  model?: string;
 }
+
+export type DeliveryState = "completed" | "delivered_and_running";
 
 export interface AskResult {
   peer: BridgePeer;
   reply: string;
   runState: RuntimeStatus["state"];
   events: RuntimeEvent[];
+  deliveryState: DeliveryState;
 }
 
 export interface BridgeTransportAttachment {

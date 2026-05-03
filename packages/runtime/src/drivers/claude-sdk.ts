@@ -76,19 +76,42 @@ function toBlock(block: unknown): NormalizedDriverMessageBlock {
   };
 }
 
-function toUsage(usage: unknown, totalCostUsd?: unknown): NormalizedDriverUsage | undefined {
+function toUsage(usage: unknown, totalCostUsd?: unknown, modelUsage?: unknown): NormalizedDriverUsage | undefined {
   if (!usage || typeof usage !== "object") {
     return typeof totalCostUsd === "number" ? { totalCostUsd } : undefined;
   }
   const value = usage as Record<string, unknown>;
+  const inputTokens = typeof value.input_tokens === "number" ? value.input_tokens : undefined;
+  const outputTokens = typeof value.output_tokens === "number" ? value.output_tokens : undefined;
+  const cacheCreationInputTokens = typeof value.cache_creation_input_tokens === "number"
+    ? value.cache_creation_input_tokens
+    : undefined;
+  const cacheReadInputTokens = typeof value.cache_read_input_tokens === "number" ? value.cache_read_input_tokens : undefined;
+  const reasoningOutputTokens = typeof value.reasoning_output_tokens === "number" ? value.reasoning_output_tokens : undefined;
+  const modelUsageValues = modelUsage && typeof modelUsage === "object" ? Object.values(modelUsage as Record<string, unknown>) : [];
+  const modelContextWindows = modelUsageValues
+    .map((entry) => entry && typeof entry === "object" ? (entry as Record<string, unknown>).contextWindow : undefined)
+    .filter((entry): entry is number => typeof entry === "number" && Number.isFinite(entry));
+  const modelMaxOutputTokens = modelUsageValues
+    .map((entry) => entry && typeof entry === "object" ? (entry as Record<string, unknown>).maxOutputTokens : undefined)
+    .filter((entry): entry is number => typeof entry === "number" && Number.isFinite(entry));
+  const contextWindow = modelContextWindows.length > 0 ? Math.max(...modelContextWindows) : undefined;
+  const maxOutputTokens = modelMaxOutputTokens.length > 0 ? Math.max(...modelMaxOutputTokens) : undefined;
+  const contextTokens = [inputTokens, cacheCreationInputTokens, cacheReadInputTokens]
+    .filter((entry): entry is number => typeof entry === "number" && Number.isFinite(entry))
+    .reduce((sum, entry) => sum + entry, 0);
+
   return {
-    inputTokens: typeof value.input_tokens === "number" ? value.input_tokens : undefined,
-    outputTokens: typeof value.output_tokens === "number" ? value.output_tokens : undefined,
-    cacheCreationInputTokens: typeof value.cache_creation_input_tokens === "number"
-      ? value.cache_creation_input_tokens
-      : undefined,
-    cacheReadInputTokens: typeof value.cache_read_input_tokens === "number" ? value.cache_read_input_tokens : undefined,
+    inputTokens,
+    outputTokens,
+    cacheCreationInputTokens,
+    cacheReadInputTokens,
+    reasoningOutputTokens,
     totalCostUsd: typeof totalCostUsd === "number" ? totalCostUsd : undefined,
+    contextTokens: contextTokens > 0 ? contextTokens : undefined,
+    contextWindow,
+    contextPercentage: contextWindow && contextTokens > 0 ? Math.round((contextTokens / contextWindow) * 1000) / 10 : undefined,
+    maxOutputTokens,
     raw: usage,
   };
 }
@@ -178,7 +201,7 @@ export function parseClaudeSdkMessage(message: unknown): NormalizedDriverMessage
       ok: !Boolean(item.is_error ?? item.isError),
       summary: typeof item.result === "string" ? item.result : JSON.stringify(item.result ?? ""),
       stopReason: typeof item.stop_reason === "string" ? item.stop_reason : undefined,
-      usage: toUsage(item.usage, item.total_cost_usd ?? item.totalCostUsd),
+      usage: toUsage(item.usage, item.total_cost_usd ?? item.totalCostUsd, item.modelUsage),
       raw: message,
     }];
   }

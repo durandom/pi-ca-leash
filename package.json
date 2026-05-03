@@ -1,12 +1,13 @@
 {
-  "name": "pi-claude-code-agent",
+  "name": "pi-ca-leash",
   "private": true,
   "version": "0.1.0",
-  "description": "Planning and implementation repo for Claude Code runtime, intercom bridge, subagents backend, and local teams backend",
+  "description": "Runtime-first Claude Code leash extension for pi",
   "type": "module",
   "keywords": [
     "pi-package",
     "pi-extension",
+    "pi-ca-leash",
     "claude-code",
     "agent-runtime"
   ],

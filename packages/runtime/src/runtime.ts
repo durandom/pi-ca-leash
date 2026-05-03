@@ -13,6 +13,7 @@ import {
   writeState,
 } from "./persistence.js";
 import { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js";
+import { CodexCliDriver } from "./drivers/codex-cli.js";
 import type { NormalizedDriverMessage, NormalizedDriverMessageBlock } from "./drivers/messages.js";
 import type {
   DriverEventEnvelope,
@@ -57,7 +58,9 @@ export class ClaudeCodeRuntime {
     this.storageDir = resolve(options.storageDir ?? defaultStorageDir());
 
     const defaultClaudeDriver = new ClaudeSdkDriver();
+    const defaultCodexDriver = new CodexCliDriver();
     this.drivers.set(defaultClaudeDriver.name, defaultClaudeDriver);
+    this.drivers.set(defaultCodexDriver.name, defaultCodexDriver);
     if (options.drivers) {
       for (const driver of Object.values(options.drivers)) {
         if (driver) {
@@ -301,7 +304,7 @@ export class ClaudeCodeRuntime {
       const failed = await this.patchStatus(sessionId, {
         state: "failed",
         activeRunId: undefined,
-        lastError: { message: `Driver exited with code ${code}` },
+        lastError: current.lastError ?? { message: `Driver exited with code ${code}` },
       });
       await this.emitEvent({ type: "session.stopped", sessionId, state: "failed" }, failed);
       return;

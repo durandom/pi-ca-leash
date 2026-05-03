@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { SubagentRunRecord } from "@pi-claude-code-agent/subagents-backend";
 import {
   acknowledgeAttention,
+  computeWidgetSignature,
   createAttentionLedger,
   createDashboardState,
   describeAttentionState,
@@ -11,7 +12,9 @@ import {
   recordDashboardRefresh,
   reconcileAttentionLedger,
   shouldRebindTransport,
+  shouldSkipBackgroundRefresh,
   snoozeAttention,
+  type WidgetSignatureInput,
 } from "./support.ts";
 
 function makeRun(overrides: Partial<SubagentRunRecord> = {}): SubagentRunRecord {
@@ -65,6 +68,44 @@ test("transport rebind only needed when peers are missing broker connections", (
   assert.equal(shouldRebindTransport({ kind: "pi-intercom", boundPeers: 0, connectedPeers: 0 }), false);
   assert.equal(shouldRebindTransport({ kind: "pi-intercom", boundPeers: 2, connectedPeers: 2 }), false);
   assert.equal(shouldRebindTransport({ kind: "pi-intercom", boundPeers: 2, connectedPeers: 1 }), true);
+});
+
+test("computeWidgetSignature is stable for identical content and changes on peer state, model, or update time", () => {
+  const base: WidgetSignatureInput = {
+    peerRows: [{ name: "reviewer", state: "idle", activity: "last reply: ok", lastUpdateAt: "2026-05-02T10:00:00.000Z" }],
+    transportDegraded: false,
+    lastEvent: "startup",
+  };
+  assert.equal(computeWidgetSignature(base), computeWidgetSignature(base));
+  assert.notEqual(
+    computeWidgetSignature(base),
+    computeWidgetSignature({ ...base, peerRows: [{ name: "reviewer", state: "busy", activity: "Bash: npm test", lastUpdateAt: "2026-05-02T10:00:00.000Z" }] }),
+  );
+  assert.notEqual(
+    computeWidgetSignature(base),
+    computeWidgetSignature({ ...base, peerRows: [{ name: "reviewer", state: "idle", activity: "last reply: ok", lastUpdateAt: "2026-05-02T10:00:00.000Z", model: "claude-sonnet-4-6" }] }),
+  );
+  assert.notEqual(
+    computeWidgetSignature(base),
+    computeWidgetSignature({ ...base, peerRows: [{ name: "reviewer", state: "idle", activity: "last reply: ok", lastUpdateAt: "2026-05-02T10:01:00.000Z" }] }),
+  );
+  assert.notEqual(
+    computeWidgetSignature(base),
+    computeWidgetSignature({ ...base, peerRows: [{ name: "reviewer", state: "idle", activity: "last reply: ok", lastUpdateAt: "2026-05-02T10:00:00.000Z", contextPercentage: 25 }] }),
+  );
+  assert.equal(
+    computeWidgetSignature(base),
+    computeWidgetSignature({ ...base }),
+  );
+});
+
+test("shouldSkipBackgroundRefresh suppresses rapid refreshes within min interval", () => {
+  const state = createDashboardState("startup", 1_000);
+
+  assert.equal(shouldSkipBackgroundRefresh(state, 1_500, 3_000), true);
+  assert.equal(shouldSkipBackgroundRefresh(state, 3_999, 3_000), true);
+  assert.equal(shouldSkipBackgroundRefresh(state, 4_000, 3_000), false);
+  assert.equal(shouldSkipBackgroundRefresh(state, 5_000, 3_000), false);
 });
 
 test("attention ledger notifies once, supports ack, and resets on note change", () => {

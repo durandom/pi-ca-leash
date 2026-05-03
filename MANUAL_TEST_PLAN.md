@@ -56,9 +56,19 @@ You need:
 - a working pi installation
 - this repository checked out locally
 
+Optional for experimental Codex-backed checks:
+- installed `codex` CLI available on `PATH`
+
 Optional but useful:
 - a second terminal window
 - an intercom broker already available from a real pi environment
+
+Internal slash commands are hidden in the default UX.
+If you want to exercise `/claude-dev-ping`, `/claude-runtime-list`, `/claude-subagent-*`, `/claude-attention-*`, or `/claude-team-*`, start pi with:
+
+```bash
+PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1 pi
+```
 
 ## Recommended clean start
 
@@ -84,7 +94,7 @@ If any of those fail, stop here and record the failure before testing pi behavio
 From the repository root:
 
 ```bash
-pi install /absolute/path/to/pi-claude-code-agent
+pi install /absolute/path/to/pi-ca-leash
 ```
 
 Expected:
@@ -95,20 +105,27 @@ Expected:
 
 Start pi from the repository root.
 
+Optional experimental Codex default for new peers:
+
+```bash
+PI_CLAUDE_RUNTIME_DRIVER=codex-cli pi
+```
+
 Expected early checks:
 - extension loads without obvious startup failure
-- status line/widget appears eventually
-- `/claude-dev-ping` works
+- widget appears eventually
+- `/claude-dashboard` works
+- dashboard event shows the expected default driver for this pi process
 
 Command:
 
 ```text
-/claude-dev-ping
+/claude-dashboard
 ```
 
 Expected:
-- custom message reports `Ping ok`
-- dashboard/status updates
+- dashboard command returns a readable report
+- widget/dashboard updates
 
 ## Phase 3 — Dashboard and runtime baseline
 
@@ -116,16 +133,12 @@ Run:
 
 ```text
 /claude-dashboard
-/claude-runtime-list
 /claude-peer-list
-/claude-team-list
 ```
 
 Expected:
 - dashboard command returns a readable report
-- runtime list returns either no sessions or previously persisted sessions you recognize
 - peer list works even if empty
-- team list works even if empty
 - no command crashes
 
 Record whether dashboard shows intercom as:
@@ -133,6 +146,21 @@ Record whether dashboard shows intercom as:
 - or `off`
 
 Both are acceptable depending on environment.
+
+If you started pi with `PI_CLAUDE_RUNTIME_DRIVER=codex-cli`, also record that the dashboard event mentions `default driver codex-cli`.
+
+Optional package-level Codex checks outside the pi host:
+
+```bash
+PI_CLAUDE_RUNTIME_DRIVER=codex-cli npm run smoke -- "Reply with exactly: codex-smoke-ok"
+PI_CLAUDE_RUNTIME_DRIVER=codex-cli npm run demo:subagent -- "Reply with exactly: codex-subagent-ok"
+PI_CLAUDE_RUNTIME_DRIVER=codex-cli npm run demo:teams -- "Reply with exactly: codex-team-ok"
+```
+
+Expected:
+- runtime smoke reports `driver: "codex-cli"`
+- subagent demo run record reports `driver: "codex-cli"`
+- teams demo teammate record reports `driver: "codex-cli"`
 
 ## Phase 4 — Named peer lifecycle
 
@@ -339,8 +367,8 @@ So this phase uses a **synthetic fixture** to validate operator UX and persisten
 From a shell in the repository root:
 
 ```bash
-mkdir -p .pi-claude-code-agent/subagents/runs/manual-attn
-cat > .pi-claude-code-agent/subagents/runs/manual-attn/status.json <<'JSON'
+mkdir -p .pi-ca-leash/subagents/runs/manual-attn
+cat > .pi-ca-leash/subagents/runs/manual-attn/status.json <<'JSON'
 {
   "runId": "manual-attn",
   "runner": "claude-code-agent",
@@ -384,7 +412,7 @@ Expected:
 To test snooze cleanly, first replace the fixture with a new note so it becomes active again:
 
 ```bash
-cat > .pi-claude-code-agent/subagents/runs/manual-attn/status.json <<'JSON'
+cat > .pi-ca-leash/subagents/runs/manual-attn/status.json <<'JSON'
 {
   "runId": "manual-attn",
   "runner": "claude-code-agent",
@@ -431,7 +459,7 @@ Expected:
 From shell:
 
 ```bash
-rm -rf .pi-claude-code-agent/subagents/runs/manual-attn
+rm -rf .pi-ca-leash/subagents/runs/manual-attn
 ```
 
 Then optionally restart pi or rerun:
@@ -457,7 +485,7 @@ Clean up anything you intentionally created.
 Optional local cleanup from shell:
 
 ```bash
-rm -rf .pi-claude-code-agent
+rm -rf .pi-ca-leash
 ```
 
 Only do that if you want to discard all local persisted state.
@@ -487,5 +515,5 @@ Please capture:
 - exact command used
 - exact visible output
 - whether the problem reproduces after a pi restart
-- whether `.pi-claude-code-agent/` contains the expected files
+- whether `.pi-ca-leash/` contains the expected files
 - whether the failure is package/runtime related or extension-host related

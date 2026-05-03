@@ -16,12 +16,16 @@ This file is intentionally blunt.
    - `runner=claude-code-agent` rejects real `fork`.
    - Better an explicit error than a fake branch illusion.
 
-4. **Codex support is partial and still extension-dark.**
+4. **Codex support is partial and still not parity-complete.**
    - Runtime has an experimental `codex-cli` driver.
    - Bridge peers can carry driver identity, including `driver: "codex-cli"`.
-   - Default extension peer UX still does not expose Codex selection.
-   - Subagents and teams remain effectively Claude-only in this repo.
-   - Automated tests do not require a real `codex` binary.
+   - Extension startup can select Codex as the default driver for new peers via `PI_CLAUDE_RUNTIME_DRIVER=codex-cli`.
+   - Per-peer driver override exists on the LLM-callable `peer_start` tool.
+   - Default slash-command peer UX still has no per-peer driver selection.
+   - Subagents and teams backend APIs, demo CLIs, and LLM-callable tools can thread driver selection, but slash-command/visual extension UX still does not expose subagent/team driver selection.
+   - Workspace tests do not require a real `codex` binary, but local smoke validation can use a real one.
+   - Context-window percentage is currently Claude SDK-derived only; Codex-backed peers show no `ctx` value unless a trustworthy context window can be derived later.
+   - Codex effective default model is only shown when explicitly requested or reported by Codex JSON events.
 
 ## Runtime/host limits
 
@@ -52,8 +56,22 @@ This file is intentionally blunt.
    - A busy peer can reject concurrent inbound work instead of queueing it.
    - There is no sophisticated queueing/scheduling layer yet.
 
+11. **Peer auto-naming is heuristic.**
+    - Default `/claude-peer-start <prompt>` derives a short readable name from prompt text.
+    - Use `/claude-peer-start <name> | <prompt>` when you need an exact stable name.
+
+12. **Peer working directory is fixed at start time.**
+    - Peer tools can choose `cwd` when starting a peer.
+    - Changing `cwd` later requires starting a new peer session.
+
+13. **Default peer UX is intentionally compressed.**
+    - The main window does not stream live peer transcript output.
+    - Peer completion is relayed back as one wrapped follow-up turn instead of live transcript spam.
+    - Detailed retained backend diagnostics live in `/claude-dashboard advanced`.
+    - Internal slash commands stay hidden unless you start pi with `PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1`.
+
 ## Documentation limits
 
-11. **This repo is documented as a local MVP, not a final product.**
+14. **This repo is documented as a local MVP, not a final product.**
     - If the implementation grows, docs must stay equally honest.
     - Remove stale claims rather than letting optimistic historical docs linger.

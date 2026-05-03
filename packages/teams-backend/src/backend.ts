@@ -24,10 +24,11 @@ export class ClaudeCodeTeamsBackend {
     const peer = await this.bridge.launchPeer({
       name: input.name,
       prompt: input.prompt,
+      driver: input.driver,
       cwd: input.cwd,
       model: input.model,
     });
-    const record = this.recordFromPeer(peer.name, peer.sessionId, peer.cwd, peer.model, mapState(peer.state), peer.createdAt, peer.updatedAt, peer.lastActivityAt);
+    const record = this.recordFromPeer(peer.name, peer.sessionId, peer.cwd, peer.driver, peer.model, mapState(peer.state), peer.createdAt, peer.updatedAt, peer.lastActivityAt);
     await writeTeammate(this.storageDir, record);
     return record;
   }
@@ -48,7 +49,7 @@ export class ClaudeCodeTeamsBackend {
     if (!peer) {
       return record;
     }
-    const next = this.recordFromPeer(peer.name, peer.sessionId, peer.cwd, peer.model, mapState(peer.state), record.createdAt, peer.updatedAt, peer.lastActivityAt);
+    const next = this.recordFromPeer(peer.name, peer.sessionId, peer.cwd, peer.driver, peer.model, mapState(peer.state), record.createdAt, peer.updatedAt, peer.lastActivityAt);
     await writeTeammate(this.storageDir, next);
     return next;
   }
@@ -117,7 +118,7 @@ export class ClaudeCodeTeamsBackend {
     await this.ready;
     const teammate = await this.requireTeammate(name);
     const peer = await this.bridge.stop(name);
-    const next = this.recordFromPeer(name, teammate.sessionId, teammate.cwd, teammate.model, mapState(peer.state), teammate.createdAt, peer.updatedAt, peer.lastActivityAt);
+    const next = this.recordFromPeer(name, teammate.sessionId, teammate.cwd, peer.driver ?? teammate.driver, teammate.model, mapState(peer.state), teammate.createdAt, peer.updatedAt, peer.lastActivityAt);
     await writeTeammate(this.storageDir, next);
     return next;
   }
@@ -129,7 +130,11 @@ export class ClaudeCodeTeamsBackend {
         continue;
       }
       try {
-        await this.bridge.attachPeer({ name: teammate.name, sessionId: teammate.sessionId });
+        const peer = await this.bridge.attachPeer({ name: teammate.name, sessionId: teammate.sessionId });
+        if (teammate.driver == null) {
+          const next = this.recordFromPeer(peer.name, peer.sessionId, peer.cwd, peer.driver, peer.model, mapState(peer.state), teammate.createdAt, peer.updatedAt, peer.lastActivityAt);
+          await writeTeammate(this.storageDir, next);
+        }
       } catch {
         // Ignore stale bridge/session records.
       }
@@ -156,6 +161,7 @@ export class ClaudeCodeTeamsBackend {
     name: string,
     sessionId: string | undefined,
     cwd: string,
+    driver: import("@pi-claude-code-agent/runtime").RuntimeDriverName | undefined,
     model: string | undefined,
     state: TeammateState,
     createdAt: string,
@@ -168,6 +174,7 @@ export class ClaudeCodeTeamsBackend {
       sessionId,
       state,
       cwd,
+      driver,
       model,
       createdAt,
       updatedAt,

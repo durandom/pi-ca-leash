@@ -1,7 +1,9 @@
 #!/usr/bin/env node
+import { ClaudeCodeRuntime, resolveRuntimeDriverFromEnv } from "@pi-claude-code-agent/runtime";
 import { ClaudeCodeSubagentBackend } from "./backend.js";
 
-const backend = new ClaudeCodeSubagentBackend();
+const runtime = new ClaudeCodeRuntime({ defaultDriver: resolveRuntimeDriverFromEnv() });
+const backend = new ClaudeCodeSubagentBackend({ runtime });
 const task = process.argv.slice(2).join(" ") || "Reply with exactly: subagent-ok";
 
 const run = await backend.startRun({
