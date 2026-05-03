@@ -197,6 +197,11 @@ test("/peer help stays passive while /peer init activates and shows guide", asyn
     assert.equal(harness.widgets.has("peer-dashboard"), false);
 
     const initMessages = await harness.run("peer", "init");
+    assert.match(String(initMessages.at(0)?.message?.details?.title ?? ""), /Agent orchestration guide/);
+    assert.equal(initMessages.at(0)?.message?.details?.surface, "agent");
+    assert.match(String(initMessages.at(1)?.message?.details?.title ?? ""), /Peer mode active/);
+    assert.equal(initMessages.at(1)?.message?.details?.surface, "custom");
+
     const userHelp = messageBody(initMessages, /Peer mode active/);
     assert.match(userHelp, /Common commands:/);
     assert.match(userHelp, /\/peer start <prompt>/);
@@ -218,6 +223,10 @@ test("first actionable /peer command activates and shows guide once", async () =
   const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
   try {
     const firstMessages = await harness.run("peer", "models codex-cli");
+    assert.match(String(firstMessages.at(0)?.message?.details?.title ?? ""), /Agent orchestration guide/);
+    assert.equal(firstMessages.at(0)?.message?.details?.surface, "agent");
+    assert.match(String(firstMessages.at(1)?.message?.details?.title ?? ""), /Peer mode active/);
+    assert.equal(firstMessages.at(1)?.message?.details?.surface, "custom");
     assert.match(messageBody(firstMessages, /Peer mode active/), /\/peer help/);
     assert.match(messageBody(firstMessages, /Agent orchestration guide/), /How to work with pi-ca-leash:/);
     assert.match(latestBody(firstMessages), /codex-cli models/);
@@ -329,6 +338,15 @@ test("renderer, status, and widget use peer/pi-ca-leash branding", async () => {
     const renderedText = String(listBox.children?.[0]?.text ?? "");
     assert.match(renderedText, /^\[peer\]/);
     assert.doesNotMatch(renderedText, /\[cca\]|pi-claude-code-agent/);
+
+    const initMessages = await harness.run("peer", "init");
+    const guideMessage = initMessages.find((entry) => String(entry.message?.details?.title ?? "") === "Agent orchestration guide")?.message;
+    assert.equal(guideMessage?.details?.surface, "agent");
+    const guideBox = renderer(guideMessage, { expanded: false }, {
+      fg: (_color: string, text: string) => text,
+      bg: (_color: string, text: string) => text,
+    });
+    assert.match(String(guideBox.children?.[0]?.text ?? ""), /^\[peer\/agent\]/);
 
     const startMessages = await harness.run("peer", "start reviewer | Review auth flow and reply briefly.");
     assert.equal(startMessages.at(-1)?.message?.details?.surface, "tool");
