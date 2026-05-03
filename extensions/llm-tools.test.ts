@@ -5,6 +5,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { ADVANCED_COMMANDS_ENV } from "./command-visibility.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
@@ -19,6 +20,9 @@ const TOOL_NAMES = [
   "peer_send",
   "peer_interrupt",
   "peer_stop",
+];
+
+const ADVANCED_TOOL_NAMES = [
   "subagent_run",
   "subagent_list",
   "subagent_status",
@@ -94,16 +98,18 @@ interface FakeTool {
   execute: (toolCallId: string, params: unknown, signal: AbortSignal | undefined, onUpdate: unknown, ctx: unknown) => Promise<any>;
 }
 
-async function loadExtensionHarness(defaultDriver: "claude-sdk" | "codex-cli", options: { codexDelayMs?: number } = {}) {
+async function loadExtensionHarness(defaultDriver: "claude-sdk" | "codex-cli", options: { codexDelayMs?: number; advanced?: boolean } = {}) {
   await ensurePiTuiStub();
   const codexExecutable = await createCodexStub(options.codexDelayMs ?? 0);
   const tempCwd = await mkdtemp(join(tmpdir(), "pi-ca-leash-extension-tools-"));
   const previousCwd = process.cwd();
   const previousDefaultDriver = process.env.PI_CLAUDE_RUNTIME_DRIVER;
   const previousCodexExecutable = process.env.CODEX_CLI_EXECUTABLE;
+  const previousAdvanced = process.env[ADVANCED_COMMANDS_ENV];
 
   process.env.PI_CLAUDE_RUNTIME_DRIVER = defaultDriver;
   process.env.CODEX_CLI_EXECUTABLE = codexExecutable;
+  process.env[ADVANCED_COMMANDS_ENV] = options.advanced ? "1" : "0";
   process.chdir(tempCwd);
 
   const tools = new Map<string, FakeTool>();
@@ -160,6 +166,11 @@ async function loadExtensionHarness(defaultDriver: "claude-sdk" | "codex-cli", o
       } else {
         process.env.CODEX_CLI_EXECUTABLE = previousCodexExecutable;
       }
+      if (previousAdvanced == null) {
+        delete process.env[ADVANCED_COMMANDS_ENV];
+      } else {
+        process.env[ADVANCED_COMMANDS_ENV] = previousAdvanced;
+      }
     },
   };
 }
@@ -170,6 +181,24 @@ test("extension registers expected LLM-callable tools", async () => {
     assert.deepEqual([...harness.tools.keys()].sort(), [...TOOL_NAMES].sort());
   } finally {
     await harness.close();
+  }
+});
+
+test("advanced backend LLM tools are hidden unless advanced commands are enabled", async () => {
+  const defaultHarness = await loadExtensionHarness("codex-cli");
+  try {
+    for (const name of ADVANCED_TOOL_NAMES) {
+      assert.equal(defaultHarness.tools.has(name), false);
+    }
+  } finally {
+    await defaultHarness.close();
+  }
+
+  const advancedHarness = await loadExtensionHarness("codex-cli", { advanced: true });
+  try {
+    assert.deepEqual([...advancedHarness.tools.keys()].sort(), [...TOOL_NAMES, ...ADVANCED_TOOL_NAMES].sort());
+  } finally {
+    await advancedHarness.close();
   }
 });
 
@@ -306,7 +335,7 @@ test("peer_stop can bulk-stop all peers only with explicit confirmation", async 
 });
 
 test("subagent tools honor codex extension default when driver omitted", async () => {
-  const harness = await loadExtensionHarness("codex-cli");
+  const harness = await loadExtensionHarness("codex-cli", { advanced: true });
   try {
     const started = await harness.execute("subagent_run", {
       task: "Reply with exactly: subagent-ok",
@@ -329,7 +358,7 @@ test("subagent tools honor codex extension default when driver omitted", async (
 });
 
 test("subagent tools thread explicit codex driver even when extension default stays claude", async () => {
-  const harness = await loadExtensionHarness("claude-sdk");
+  const harness = await loadExtensionHarness("claude-sdk", { advanced: true });
   try {
     const started = await harness.execute("subagent_run", {
       task: "Reply with exactly: subagent-ok",
@@ -352,7 +381,7 @@ test("subagent tools thread explicit codex driver even when extension default st
 });
 
 test("team tools honor codex extension default when driver omitted", async () => {
-  const harness = await loadExtensionHarness("codex-cli");
+  const harness = await loadExtensionHarness("codex-cli", { advanced: true });
   try {
     const spawned = await harness.execute("team_spawn", {
       name: "worker",
@@ -388,7 +417,7 @@ test("team tools honor codex extension default when driver omitted", async () =>
 });
 
 test("team tools thread and preserve explicit codex driver through extension execute handlers", async () => {
-  const harness = await loadExtensionHarness("claude-sdk");
+  const harness = await loadExtensionHarness("claude-sdk", { advanced: true });
   try {
     const spawned = await harness.execute("team_spawn", {
       name: "worker",

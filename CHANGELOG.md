@@ -2,7 +2,7 @@
 
 All notable changes to this repository should be recorded here.
 
-## 0.4.2 - 2026-05-03
+## 0.5.0 - 2026-05-03
 
 ### Changed
 - Runtime model selection now resolves common shorthand aliases such as `sonnet`, `opus`, `haiku`, `mini`, and `spark` to concrete catalog model ids before launching peers, subagents, or teammates.
@@ -10,6 +10,7 @@ All notable changes to this repository should be recorded here.
 - `runtime_models` reports bundled model aliases alongside exact model ids.
 - Compact Peers widget rendering now uses a small adaptive table layout helper, including a wide-mode driver column and narrow-mode fallback.
 - `/peer help` now includes versioned concept guidance, and `/peer about` reports installed version and runtime environment details without activating peer mode.
+- Subagent and team LLM-callable tools are now hidden by default and only registered when `PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1`.
 
 ### Fixed
 - Runtime driver errors now add actionable hints for missing Claude Code/Codex executables, Bedrock credential routing, missing API keys, and prompt/context-length failures.

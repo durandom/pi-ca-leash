@@ -1007,7 +1007,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     },
   });
 
-  pi.registerTool({
+  if (showAdvancedCommands) {
+    pi.registerTool({
     name: "subagent_run",
     label: "Run Subagent",
     description: "Start a runtime-backed subagent run and return its status or result.",
@@ -1388,6 +1389,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       };
     },
   });
+  }
 
   pi.on("session_start", async (event, ctx) => {
     if (peerModeActive) {

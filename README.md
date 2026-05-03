@@ -113,7 +113,7 @@ peer_interrupt(name)
 peer_stop(name?, all?, confirmAll?)
 ```
 
-LLM-callable backend tools:
+Advanced LLM-callable backend tools are hidden by default while their integration model is still being refined. Enable them only for development with `PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1`:
 
 ```text
 subagent_run(task, name?, prompt?, driver?, model?, cwd?, async?)
@@ -155,7 +155,7 @@ Runtime driver notes:
 - `codex-cli` is experimental
 - `PI_CLAUDE_RUNTIME_DRIVER=codex-cli` changes the default for newly started peers
 - `/peer models` and LLM-callable `runtime_models` expose a bundled Lanista-derived model catalog
-- LLM-callable `peer_start`, `peer_ask`, `peer_send`, `subagent_run`, and `team_spawn` can pass explicit model ids
+- LLM-callable `peer_start`, `peer_ask`, and `peer_send` can pass explicit model ids
 - `/peer start` can pass driver and model in pipe syntax
 - common catalog aliases such as `sonnet`, `opus`, `haiku`, `mini`, and `spark` are resolved to exact model ids before runtime launch
 - catalog validation is advisory; unknown model ids are still passed through to the runtime because provider and CLI availability is environment-dependent
