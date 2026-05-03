@@ -208,6 +208,24 @@ test("first actionable /peer command activates and shows guide once", async () =
   }
 });
 
+test("compact peer widget renders summary and column labels", async () => {
+  const harness = await loadCommandHarness({ defaultDriver: "codex-cli", codexDelayMs: 150 });
+  try {
+    await harness.run("peer", "start reviewer | Review auth flow and reply briefly.");
+    const widget = harness.widgets.get("peer-dashboard") as ((tui: unknown, theme: { fg: (color: string, text: string) => string }) => { render(width: number): string[] }) | undefined;
+    assert.ok(widget, "Expected peer dashboard widget");
+
+    const rendered = widget(undefined, { fg: (_color: string, text: string) => text });
+    const lines = rendered.render(88);
+    assert.match(lines[0] ?? "", /Peers 1 peer/);
+    assert.match(lines[0] ?? "", /● active|● idle/);
+    assert.match(lines.join("\n"), /peer\s+state\s+(model\s+)?updated\s+activity/);
+    assert.match(lines.join("\n"), /reviewer/);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("/peer commands stay renderless in --no-session smoke mode", async () => {
   const harness = await loadCommandHarness({ defaultDriver: "codex-cli", noSession: true });
   try {

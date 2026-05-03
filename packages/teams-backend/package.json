@@ -1,6 +1,6 @@
 {
   "name": "@pi-claude-code-agent/teams-backend",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "Persistent teammate backend on top of Claude runtime intercom bridge",
   "main": "./dist/index.js",

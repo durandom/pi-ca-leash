@@ -204,6 +204,18 @@ test("peer_start returns and displays no-babysitting guidance", async () => {
   }
 });
 
+test("peer_start resolves model aliases before runtime launch", async () => {
+  const harness = await loadExtensionHarness("codex-cli", { codexDelayMs: 150 });
+  try {
+    const started = await harness.execute("peer_start", { prompt: "Use a fast model.", model: "mini" });
+    assert.equal(started.details.requestedModel, "mini");
+    assert.equal(started.details.model, "gpt-5.4-mini");
+    assert.match(started.details.modelNote, /model alias mini -> model gpt-5\.4-mini/);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("peer_ask returns and displays the outgoing prompt", async () => {
   const harness = await loadExtensionHarness("codex-cli");
   try {

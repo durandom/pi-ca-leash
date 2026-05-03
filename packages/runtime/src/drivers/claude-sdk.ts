@@ -285,10 +285,11 @@ export class ClaudeSdkDriver implements RuntimeDriver {
         if ((error as Error)?.name === "AbortError") {
           return { code: 130, signal: "SIGINT" as const };
         }
+        const message = enrichClaudeSdkErrorMessage(error instanceof Error ? error.message : String(error), input.model);
         await onEvent({
           type: "error",
           payload: {
-            message: error instanceof Error ? error.message : String(error),
+            message,
             code: "CLAUDE_SDK_ERROR",
           },
         });
@@ -337,4 +338,30 @@ export class ClaudeSdkDriver implements RuntimeDriver {
     }
     return result;
   }
+}
+
+function enrichClaudeSdkErrorMessage(message: string, model?: string): string {
+  const lower = message.toLowerCase();
+  const hints: string[] = [];
+
+  if (lower.includes("native binary not found") || lower.includes("claude code") && lower.includes("not found")) {
+    hints.push("Install Claude Code or set CLAUDE_CODE_EXECUTABLE to the native binary path.");
+  }
+  if (lower.includes("bedrock")) {
+    hints.push("This model/provider appears to route through Amazon Bedrock; use a fully qualified model id from runtime_models or configure Bedrock credentials.");
+  }
+  if (lower.includes("api key") || lower.includes("apikey") || lower.includes("unauthorized")) {
+    hints.push("Provider credentials are missing or rejected for this runtime/model.");
+  }
+  if (lower.includes("prompt is too long") || lower.includes("prompt too long") || lower.includes("context length")) {
+    hints.push("Split the task into smaller slices or ask the peer to inspect files instead of pasting large context.");
+  }
+  if (model && /^(opus|sonnet|haiku)$/i.test(model.trim())) {
+    hints.push(`"${model}" is a shorthand alias; pass the full Claude model id to the runtime.`);
+  }
+
+  if (hints.length === 0) {
+    return message;
+  }
+  return [message, ...[...new Set(hints)].map((hint) => `Hint: ${hint}`)].join("\n");
 }

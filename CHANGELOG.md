@@ -2,6 +2,16 @@
 
 All notable changes to this repository should be recorded here.
 
+## 0.4.0 - 2026-05-03
+
+### Changed
+- Runtime model selection now resolves common shorthand aliases such as `sonnet`, `opus`, `haiku`, `mini`, and `spark` to concrete catalog model ids before launching peers, subagents, or teammates.
+- Peer/subagent/team launch surfaces now include prompt-size warnings for large delegated prompts, nudging agents toward smaller slices and file-based context.
+- `runtime_models` reports bundled model aliases alongside exact model ids.
+
+### Fixed
+- Runtime driver errors now add actionable hints for missing Claude Code/Codex executables, Bedrock credential routing, missing API keys, and prompt/context-length failures.
+
 ## 0.3.0 - 2026-05-03
 
 ### Changed
@@ -16,7 +26,8 @@ All notable changes to this repository should be recorded here.
 - `/peer start` can now include explicit driver and model fields in pipe syntax.
 - Runtime tool guidance now points agents to `runtime_models` before choosing non-default model ids.
 - Polished README setup, persistence, and runtime-driver wording around the current local MVP.
-- Aligned workspace package versions with the root `0.2.0` package version.
+- Polished the compact Peers widget with peer counts, column labels, priority ordering, clearer context usage, and explicit local-mode broker warning text.
+- Aligned workspace package versions with the root `0.3.0` package version.
 - Reworked README into the single practical entrypoint, with the useful manual smoke and peer no-polling guidance folded in.
 
 ### Fixed

@@ -291,7 +291,7 @@ export class CodexCliDriver implements RuntimeDriver {
             // Spawn failure overrides all other error paths
             deliver({
               type: "error",
-              payload: { message: spawnError.message, code: "SPAWN_ERROR" },
+              payload: { message: enrichCodexSpawnErrorMessage(spawnError.message), code: "SPAWN_ERROR" },
             });
           } else if (!aborted && code !== 0 && !structuredErrorEmitted) {
             // Surface stderr + any malformed stdout context from ring buffer
@@ -320,4 +320,12 @@ export class CodexCliDriver implements RuntimeDriver {
       done,
     };
   }
+}
+
+function enrichCodexSpawnErrorMessage(message: string): string {
+  const lower = message.toLowerCase();
+  if (!lower.includes("enoent") && !lower.includes("not found")) {
+    return message;
+  }
+  return `${message}\nHint: codex executable could not be spawned. Check PATH or set CODEX_CLI_EXECUTABLE to the Codex CLI binary.`;
 }

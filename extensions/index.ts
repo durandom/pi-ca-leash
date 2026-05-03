@@ -19,7 +19,8 @@ import {
 import { formatPeerHistoryPage } from "./peer-history.js";
 import { buildPeerActivityRow, getPeerFirstHealth, isPeerVisibleInWidget, type PeerActivityRow } from "./peer-ux.js";
 import { parseRuntimeDriverName, resolveExtensionRuntimeDriverConfig } from "./runtime-driver.js";
-import { describeModelSelection, modelCatalogsForDriver, type RuntimeDriverModelCatalog } from "./model-catalog.js";
+import { modelCatalogsForDriver, resolveRuntimeModelSelection, type RuntimeDriverModelCatalog } from "./model-catalog.js";
+import { describePromptSize } from "./runtime-safety.js";
 import {
   PEER_ASK_TOOL_PROMPT,
   PEER_BRIDGE_APPEND_SYSTEM_PROMPT,
@@ -556,7 +557,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         throw new Error("driver must be claude-sdk or codex-cli");
       }
       const effectiveDriver = driver ?? runtimeDriverConfig.defaultDriver;
-      const modelNote = describeModelSelection(effectiveDriver, model);
+      const modelSelection = resolveRuntimeModelSelection(effectiveDriver, model);
+      const modelNote = modelSelection.note;
+      const promptSizeNote = describePromptSize("peer prompt", prompt);
 
       const existingNames = new Set((await bridge.listPeers()).map((peer) => peer.name));
       const name = explicitName || derivePeerName(prompt, existingNames);
@@ -568,7 +571,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         prompt,
         driver,
         cwd: peerCwd ?? cwd,
-        model,
+        model: modelSelection.runtimeModel,
         permissionMode: "bypassPermissions",
       });
       peerNameCache.add(peer.name);
@@ -584,6 +587,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           `state ${row.state}`,
           `driver ${peer.driver ?? "claude-sdk"}`,
           modelNote,
+          promptSizeNote,
           `session ${peer.sessionId}`,
           "",
           PEER_NO_BABYSITTING_GUIDANCE,
@@ -600,12 +604,13 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
             `driver ${peer.driver ?? "claude-sdk"}`,
             `model ${peer.model ?? "-"}`,
             modelNote,
+            promptSizeNote,
             `cwd ${peer.cwd}`,
             `session ${peer.sessionId}`,
             message ? `latest peer message\n${formatQuotedTextBlock(message)}` : undefined,
           ].filter(Boolean).join("\n\n"),
         }],
-        details: { peerName: peer.name, state: row.state, sessionId: peer.sessionId, driver: peer.driver, model: peer.model, modelNote, cwd: peer.cwd, guidance: PEER_NO_BABYSITTING_GUIDANCE },
+        details: { peerName: peer.name, state: row.state, sessionId: peer.sessionId, driver: peer.driver, model: peer.model, requestedModel: model, modelNote, promptSizeNote, cwd: peer.cwd, guidance: PEER_NO_BABYSITTING_GUIDANCE },
       };
     },
   });
@@ -754,20 +759,22 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       }
       const currentPeer = await bridge.status(name).catch(() => undefined);
       const effectiveDriver = currentPeer?.driver ?? runtimeDriverConfig.defaultDriver;
-      const modelNote = model ? describeModelSelection(effectiveDriver, model) : undefined;
+      const modelSelection = model ? resolveRuntimeModelSelection(effectiveDriver, model) : undefined;
+      const modelNote = modelSelection?.note;
+      const promptSizeNote = describePromptSize("peer message", message);
 
       sendCommandMessage(pi, {
         level: "info",
         command: "peer_ask",
         title: `Sent to peer: ${name}`,
-        body: [modelNote, formatQuotedTextBlock(truncate(message, 4_000))].filter(Boolean).join("\n\n"),
+        body: [modelNote, promptSizeNote, formatQuotedTextBlock(truncate(message, 4_000))].filter(Boolean).join("\n\n"),
       });
 
       suppressNextPeerRelay.delete(name);
       const result = await bridge.ask(name, {
         from: "pi-main-agent",
         text: message,
-        model,
+        model: modelSelection?.runtimeModel,
       });
       peerNameCache.add(name);
       const { row } = await syncPeerRelaySnapshot(result.peer);
@@ -786,10 +793,11 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
             `driver ${result.peer.driver ?? "claude-sdk"}`,
             `model ${result.peer.model ?? "-"}`,
             modelNote,
+            promptSizeNote,
             `quoted peer message\n${formatQuotedTextBlock(visibleReply)}`,
           ].filter(Boolean).join("\n\n"),
         }],
-        details: { peerName: name, state: row.state, sessionId: result.peer.sessionId, driver: result.peer.driver, model: result.peer.model, modelNote, cwd: result.peer.cwd, message, reply: result.reply, deliveryState: result.deliveryState },
+        details: { peerName: name, state: row.state, sessionId: result.peer.sessionId, driver: result.peer.driver, model: result.peer.model, requestedModel: model, modelNote, promptSizeNote, cwd: result.peer.cwd, message, reply: result.reply, deliveryState: result.deliveryState },
       };
     },
   });
@@ -821,20 +829,22 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       }
       const currentPeer = await bridge.status(name).catch(() => undefined);
       const effectiveDriver = currentPeer?.driver ?? runtimeDriverConfig.defaultDriver;
-      const modelNote = model ? describeModelSelection(effectiveDriver, model) : undefined;
+      const modelSelection = model ? resolveRuntimeModelSelection(effectiveDriver, model) : undefined;
+      const modelNote = modelSelection?.note;
+      const promptSizeNote = describePromptSize("peer message", message);
 
       sendCommandMessage(pi, {
         level: "info",
         command: "peer_send",
         title: `Sent to peer: ${name}`,
-        body: [modelNote, formatQuotedTextBlock(truncate(message, 4_000))].filter(Boolean).join("\n\n"),
+        body: [modelNote, promptSizeNote, formatQuotedTextBlock(truncate(message, 4_000))].filter(Boolean).join("\n\n"),
       });
 
       suppressNextPeerRelay.delete(name);
       const peer = await bridge.send(name, {
         from: "pi-main-agent",
         text: message,
-        model,
+        model: modelSelection?.runtimeModel,
       }, { waitForIdle: false });
       peerNameCache.add(name);
       const { row } = await syncPeerRelaySnapshot(peer);
@@ -850,9 +860,10 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
             `driver ${peer.driver ?? "claude-sdk"}`,
             `model ${peer.model ?? "-"}`,
             modelNote,
+            promptSizeNote,
           ].filter(Boolean).join("\n\n"),
         }],
-        details: { peerName: name, state: row.state, sessionId: peer.sessionId, driver: peer.driver, model: peer.model, modelNote, cwd: peer.cwd, message, deliveryState: "delivered_and_running" },
+        details: { peerName: name, state: row.state, sessionId: peer.sessionId, driver: peer.driver, model: peer.model, requestedModel: model, modelNote, promptSizeNote, cwd: peer.cwd, message, deliveryState: "delivered_and_running" },
       };
     },
   });
@@ -1016,9 +1027,11 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       await activatePeerMode(ctx, { command: "subagent_run", reason: "Peer mode activated" });
       const input = parseSubagentRunToolInput(params as { task?: unknown; name?: unknown; prompt?: unknown; driver?: unknown; model?: unknown; cwd?: unknown; async?: unknown });
       const effectiveDriver = input.driver ?? runtimeDriverConfig.defaultDriver;
-      const modelNote = describeModelSelection(effectiveDriver, input.model);
+      const modelSelection = resolveRuntimeModelSelection(effectiveDriver, input.model);
+      const modelNote = modelSelection.note;
+      const promptSizeNote = describePromptSize("subagent task", input.task);
 
-      const run = await subagents.startRun(buildSubagentRunRequest(input, cwd));
+      const run = await subagents.startRun(buildSubagentRunRequest({ ...input, model: modelSelection.runtimeModel }, cwd));
       await syncAttentionLedger();
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Run ${shortId(run.runId)} ${run.state}`);
       return {
@@ -1029,6 +1042,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
             `agent ${run.agentName}`,
             `driver ${run.driver ?? runtimeDriverConfig.defaultDriver}`,
             modelNote,
+            promptSizeNote,
             `state ${run.state}`,
             `cwd ${run.cwd}`,
             run.sessionId ? `session ${run.sessionId}` : undefined,
@@ -1040,7 +1054,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           agentName: run.agentName,
           driver: run.driver,
           model: run.model,
+          requestedModel: input.model,
           modelNote,
+          promptSizeNote,
           state: run.state,
           cwd: run.cwd,
           sessionId: run.sessionId,
@@ -1173,12 +1189,14 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       await activatePeerMode(ctx, { command: "team_spawn", reason: "Peer mode activated" });
       const input = parseTeamSpawnToolInput(params as { name?: unknown; prompt?: unknown; driver?: unknown; model?: unknown; cwd?: unknown });
       const effectiveDriver = input.driver ?? runtimeDriverConfig.defaultDriver;
-      const modelNote = describeModelSelection(effectiveDriver, input.model);
+      const modelSelection = resolveRuntimeModelSelection(effectiveDriver, input.model);
+      const modelNote = modelSelection.note;
+      const promptSizeNote = describePromptSize("teammate prompt", input.prompt);
 
       if (!noSessionMode) {
         await ensureIntercomTransportHealthy(false);
       }
-      const teammate = await teams.spawnTeammate(buildTeamSpawnRequest(input, cwd));
+      const teammate = await teams.spawnTeammate(buildTeamSpawnRequest({ ...input, model: modelSelection.runtimeModel }, cwd));
       suppressNextPeerRelay.add(teammate.name);
       peerNameCache.add(teammate.name);
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Team + ${teammate.name}`);
@@ -1189,12 +1207,13 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
             `Teammate spawned: ${teammate.name}`,
             `driver ${teammate.driver ?? runtimeDriverConfig.defaultDriver}`,
             modelNote,
+            promptSizeNote,
             `state ${teammate.state}`,
             `cwd ${teammate.cwd}`,
             `session ${teammate.sessionId ?? "-"}`,
-          ].join("\n\n"),
+          ].filter(Boolean).join("\n\n"),
         }],
-        details: { ...teammate, modelNote },
+        details: { ...teammate, requestedModel: input.model, modelNote, promptSizeNote },
       };
     },
   });
@@ -1430,7 +1449,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     const existingNames = new Set((await bridge.listPeers()).map((peer) => peer.name));
     const name = parsed.name ?? derivePeerName(parsed.prompt, existingNames);
     const effectiveDriver = parsed.driver ?? runtimeDriverConfig.defaultDriver;
-    const modelNote = describeModelSelection(effectiveDriver, parsed.model);
+    const modelSelection = resolveRuntimeModelSelection(effectiveDriver, parsed.model);
+    const modelNote = modelSelection.note;
+    const promptSizeNote = describePromptSize("peer prompt", parsed.prompt);
 
     sendCommandMessage(pi, {
       level: "info",
@@ -1440,6 +1461,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         parsed.autoNamed ? `auto-named from prompt\n\n${truncate(parsed.prompt, 160)}` : "Watch Peers widget for live activity.",
         parsed.driver ? `driver ${parsed.driver}` : undefined,
         modelNote,
+        promptSizeNote,
       ].filter(Boolean).join("\n\n"),
     });
 
@@ -1450,7 +1472,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       name,
       prompt: parsed.prompt,
       driver: parsed.driver,
-      model: parsed.model,
+      model: modelSelection.runtimeModel,
       cwd,
       permissionMode: "bypassPermissions",
     });
@@ -1466,6 +1488,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         `state ${peer.state}`,
         `driver ${peer.driver ?? "claude-sdk"}`,
         modelNote,
+        promptSizeNote,
         `session ${peer.sessionId}`,
         "",
         PEER_NO_BABYSITTING_GUIDANCE,
@@ -2189,7 +2212,8 @@ function createDashboardWidget(snapshot: DashboardSnapshot) {
     render(width: number): string[] {
       const widgetRows = snapshot.peerRows.filter(isPeerVisibleInWidget);
       const health = getPeerFirstHealth(widgetRows, snapshot.transportDegraded);
-      const title = theme.fg("accent", "Peers");
+      const summary = formatWidgetSummary(widgetRows, snapshot.transportDegraded);
+      const title = `${theme.fg("accent", "Peers")} ${theme.fg("dim", summary)}`;
       const badge = health === "warning"
         ? theme.fg("warning", "● warning")
         : health === "active"
@@ -2204,20 +2228,30 @@ function createDashboardWidget(snapshot: DashboardSnapshot) {
         lines.push(truncateToWidth("no active peers", width));
         lines.push(truncateToWidth(theme.fg("dim", "stopped peers in /peer dashboard"), width));
       } else {
+        const rows = sortWidgetRows(widgetRows);
         const nameWidth = Math.min(12, Math.max(4, ...widgetRows.map((row) => row.name.length)));
-        const stateWidth = Math.min(9, Math.max(4, ...widgetRows.map((row) => row.state.length)));
+        const stateWidth = Math.min(9, Math.max(5, ...widgetRows.map((row) => row.state.length)));
         const showModel = width >= 52 && widgetRows.some((row) => row.model);
         const modelWidth = showModel
           ? Math.min(12, Math.max(4, ...widgetRows.map((row) => compactModel(row.model ?? "").length)))
           : 0;
         const showContext = width >= 64 && widgetRows.some(hasPeerContextUsage);
         const contextWidth = showContext
-          ? Math.max(3, ...widgetRows.map((row) => formatPeerContextUsage(row).length))
+          ? Math.max(3, ...widgetRows.map((row) => formatWidgetContextUsage(row).length))
           : 0;
 
         const showLastUpdate = width >= 44;
+        const header = [
+          "peer".padEnd(nameWidth),
+          "state".padEnd(stateWidth),
+          showModel ? "model".padEnd(modelWidth) : undefined,
+          showContext ? "ctx".padEnd(contextWidth) : undefined,
+          showLastUpdate ? "updated" : undefined,
+          "activity",
+        ].filter((part): part is string => Boolean(part)).join("  ");
+        lines.push(truncateToWidth(theme.fg("dim", header), width));
 
-        for (const row of widgetRows) {
+        for (const row of rows) {
           const stateColor = row.state === "busy"
             ? "success"
             : ["waiting", "offline"].includes(row.state)
@@ -2225,21 +2259,45 @@ function createDashboardWidget(snapshot: DashboardSnapshot) {
               : row.state === "error"
                 ? "error"
                 : "text";
-          const modelPart = showModel ? `  ${(row.model ? compactModel(row.model) : "-").padEnd(modelWidth)}` : "";
-          const contextPart = showContext ? `  ${formatPeerContextUsage(row).padEnd(contextWidth)}` : "";
+          const modelPart = showModel ? `  ${theme.fg("dim", (row.model ? compactModel(row.model) : "-").padEnd(modelWidth))}` : "";
+          const contextPart = showContext ? `  ${theme.fg(contextUsageColor(row), formatWidgetContextUsage(row).padEnd(contextWidth))}` : "";
           const updatePart = showLastUpdate ? `  ${theme.fg("dim", formatIsoTime(row.lastUpdateAt))}` : "";
-          const line = `${row.name.padEnd(nameWidth)}  ${theme.fg(stateColor, row.state.padEnd(stateWidth))}${modelPart}${contextPart}${updatePart}  ${row.activity}`;
+          const name = truncateToWidth(row.name, nameWidth).padEnd(nameWidth);
+          const line = `${name}  ${theme.fg(stateColor, row.state.padEnd(stateWidth))}${modelPart}${contextPart}${updatePart}  ${row.activity}`;
           lines.push(truncateToWidth(line, width));
         }
       }
 
       if (snapshot.transportDegraded) {
-        lines.push(truncateToWidth(theme.fg("warning", "broker offline"), width));
+        lines.push(truncateToWidth(theme.fg("warning", "broker offline; peers stay local"), width));
       }
 
       return lines;
     },
   });
+}
+
+function formatWidgetSummary(rows: PeerActivityRow[], transportDegraded: boolean): string {
+  const busy = rows.filter((row) => row.state === "busy").length;
+  const issues = rows.filter((row) => ["error", "offline", "waiting"].includes(row.state)).length + (transportDegraded ? 1 : 0);
+  return [
+    `${rows.length} peer${rows.length === 1 ? "" : "s"}`,
+    busy > 0 ? `${busy} busy` : undefined,
+    issues > 0 ? `${issues} issue${issues === 1 ? "" : "s"}` : undefined,
+  ].filter((part): part is string => Boolean(part)).join(" · ");
+}
+
+function sortWidgetRows(rows: PeerActivityRow[]): PeerActivityRow[] {
+  const priority = (row: PeerActivityRow) => {
+    if (["error", "waiting", "offline"].includes(row.state)) {
+      return 0;
+    }
+    if (row.state === "busy") {
+      return 1;
+    }
+    return 2;
+  };
+  return [...rows].sort((left, right) => priority(left) - priority(right) || left.name.localeCompare(right.name));
 }
 
 async function collectDashboardData(
@@ -2558,12 +2616,21 @@ function formatModelCatalogReport(catalogs: RuntimeDriverModelCatalog[]): string
       `${catalog.driver} models`,
       `provider ${catalog.provider}`,
       `default ${catalog.defaultModel}`,
+      `aliases ${formatModelAliases(catalog.aliases)}`,
       `cli ${catalog.flag}`,
       `source ${catalog.source}`,
       "",
       formatTable(["model", "name", "ctx", "max", "reasoning", "$/M in/out"], rows),
     ].join("\n");
   }).join("\n\n");
+}
+
+function formatModelAliases(aliases: Record<string, string>): string {
+  const entries = Object.entries(aliases);
+  if (entries.length === 0) {
+    return "-";
+  }
+  return entries.map(([alias, target]) => `${alias}->${target}`).join(", ");
 }
 
 function formatTable(headers: string[], rows: string[][]): string {
@@ -2595,6 +2662,32 @@ function formatPeerContextUsage(row: Pick<PeerActivityRow, "contextPercentage">)
     ? "<1"
     : String(Math.round(row.contextPercentage));
   return `ctx ${percentage}%`;
+}
+
+function formatWidgetContextUsage(row: Pick<PeerActivityRow, "contextPercentage">): string {
+  if (row.contextPercentage == null) {
+    return "-";
+  }
+  if (row.contextPercentage > 999) {
+    return ">999%";
+  }
+  const percentage = row.contextPercentage > 0 && row.contextPercentage < 1
+    ? "<1"
+    : String(Math.round(row.contextPercentage));
+  return `${percentage}%`;
+}
+
+function contextUsageColor(row: Pick<PeerActivityRow, "contextPercentage">): string {
+  if (row.contextPercentage == null) {
+    return "dim";
+  }
+  if (row.contextPercentage >= 100) {
+    return "error";
+  }
+  if (row.contextPercentage >= 80) {
+    return "warning";
+  }
+  return "dim";
 }
 
 function levelColor(level: CommandMessageLevel): string {

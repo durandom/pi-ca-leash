@@ -154,6 +154,7 @@ Runtime driver notes:
 - `/peer models` and LLM-callable `runtime_models` expose a bundled Lanista-derived model catalog
 - LLM-callable `peer_start`, `peer_ask`, `peer_send`, `subagent_run`, and `team_spawn` can pass explicit model ids
 - `/peer start` can pass driver and model in pipe syntax
+- common catalog aliases such as `sonnet`, `opus`, `haiku`, `mini`, and `spark` are resolved to exact model ids before runtime launch
 - catalog validation is advisory; unknown model ids are still passed through to the runtime because provider and CLI availability is environment-dependent
 
 ## Repository Layout

@@ -1,6 +1,6 @@
 {
   "name": "@pi-claude-code-agent/subagents-backend",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "description": "Runtime-backed subagent backend abstraction and Claude Code runner",
   "main": "./dist/index.js",

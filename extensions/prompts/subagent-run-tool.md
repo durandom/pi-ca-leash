@@ -3,3 +3,4 @@ Run a delegated subagent task through the local backend. Supports driver, model,
 - Pass `driver` to force `claude-sdk` or `codex-cli` for this run instead of using the extension default.
 - Call `runtime_models` first when you need the supported model ids for a driver.
 - Pass `async: true` when you want to launch a background run and inspect it later with `subagent_status` or `subagent_list`.
+- Keep delegated tasks bounded. If the tool reports a prompt size warning, split the run into smaller slices.

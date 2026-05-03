@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { describeModelSelection, findRuntimeModel, modelCatalogsForDriver } from "./model-catalog.ts";
+import { describeModelSelection, findRuntimeModel, modelCatalogsForDriver, resolveRuntimeModelSelection } from "./model-catalog.ts";
 
 test("model catalog maps runtime drivers to Lanista provider snapshots", () => {
   const claude = modelCatalogsForDriver("claude-sdk")[0]!;
@@ -8,11 +8,22 @@ test("model catalog maps runtime drivers to Lanista provider snapshots", () => {
 
   assert.equal(claude.provider, "anthropic");
   assert.equal(claude.defaultModel, "claude-opus-4-7");
+  assert.equal(claude.aliases.sonnet, "claude-sonnet-4-6");
   assert.ok(findRuntimeModel("claude-sdk", "claude-sonnet-4-6"));
 
   assert.equal(codex.provider, "openai-codex");
   assert.equal(codex.defaultModel, "gpt-5.5");
+  assert.equal(codex.aliases.mini, "gpt-5.4-mini");
   assert.ok(findRuntimeModel("codex-cli", "gpt-5.4-mini"));
+});
+
+test("model aliases resolve to concrete runtime model ids", () => {
+  const sonnet = resolveRuntimeModelSelection("claude-sdk", "sonnet");
+  assert.equal(sonnet.runtimeModel, "claude-sonnet-4-6");
+  assert.match(sonnet.note, /model alias sonnet -> model claude-sonnet-4-6/);
+
+  const mini = resolveRuntimeModelSelection("codex-cli", "mini");
+  assert.equal(mini.runtimeModel, "gpt-5.4-mini");
 });
 
 test("model selection notes are advisory for unknown models", () => {

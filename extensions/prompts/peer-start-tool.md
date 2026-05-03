@@ -4,3 +4,4 @@ Start a long-lived runtime-backed peer for delegated work. Returns peer name, st
 - Pass `driver` when you need to force `claude-sdk` or `codex-cli` for this peer instead of using the extension default.
 - Call `runtime_models` first when you need the supported model ids for a driver.
 - Pass `model` and `cwd` when you need a specific model and working directory.
+- Keep bootstrap prompts scoped. If the tool reports a prompt size warning, start a smaller peer and point it at files instead of pasting large context.

@@ -15,10 +15,19 @@ export interface RuntimeDriverModelCatalog {
   driver: RuntimeDriverName;
   provider: "anthropic" | "openai-codex";
   defaultModel: string;
+  aliases: Record<string, string>;
   cli: string;
   flag: string;
   source: string;
   models: RuntimeModelCatalogEntry[];
+}
+
+export interface RuntimeModelSelection {
+  requestedModel?: string;
+  runtimeModel?: string;
+  note: string;
+  alias?: string;
+  entry?: RuntimeModelCatalogEntry;
 }
 
 const LANISTA_SOURCE = "lanista agents anthropic/codex";
@@ -28,6 +37,11 @@ export const RUNTIME_MODEL_CATALOGS: Record<RuntimeDriverName, RuntimeDriverMode
     driver: "claude-sdk",
     provider: "anthropic",
     defaultModel: "claude-opus-4-7",
+    aliases: {
+      haiku: "claude-haiku-4-5",
+      opus: "claude-opus-4-7",
+      sonnet: "claude-sonnet-4-6",
+    },
     cli: "claude-code",
     flag: "claude --model <id>",
     source: LANISTA_SOURCE,
@@ -61,6 +75,11 @@ export const RUNTIME_MODEL_CATALOGS: Record<RuntimeDriverName, RuntimeDriverMode
     driver: "codex-cli",
     provider: "openai-codex",
     defaultModel: "gpt-5.5",
+    aliases: {
+      codex: "gpt-5.3-codex",
+      mini: "gpt-5.4-mini",
+      spark: "gpt-5.3-codex-spark",
+    },
     cli: "codex",
     flag: "codex --model <id>",
     source: LANISTA_SOURCE,
@@ -91,13 +110,46 @@ export function findRuntimeModel(driver: RuntimeDriverName, model: string): Runt
   return RUNTIME_MODEL_CATALOGS[driver].models.find((entry) => entry.id === normalized);
 }
 
-export function describeModelSelection(driver: RuntimeDriverName, model?: string): string | undefined {
-  if (!model) {
-    return `model default ${RUNTIME_MODEL_CATALOGS[driver].defaultModel}`;
+export function resolveRuntimeModelSelection(driver: RuntimeDriverName, model?: string): RuntimeModelSelection {
+  const catalog = RUNTIME_MODEL_CATALOGS[driver];
+  const requestedModel = model?.trim() || undefined;
+  if (!requestedModel) {
+    return {
+      runtimeModel: undefined,
+      note: `model default ${catalog.defaultModel}`,
+    };
   }
-  const entry = findRuntimeModel(driver, model);
+
+  const aliasTarget = catalog.aliases[requestedModel.toLowerCase()];
+  const runtimeModel = aliasTarget ?? requestedModel;
+  const entry = findRuntimeModel(driver, runtimeModel);
   if (!entry) {
-    return `model ${model} not in bundled ${RUNTIME_MODEL_CATALOGS[driver].provider} catalog; passing through to runtime`;
+    return {
+      requestedModel,
+      runtimeModel,
+      note: `model ${requestedModel} not in bundled ${catalog.provider} catalog; passing through to runtime`,
+    };
   }
-  return `model ${entry.id} (${entry.name}, ctx ${entry.contextWindow}, max ${entry.maxTokens})`;
+
+  const entryNote = `model ${entry.id} (${entry.name}, ctx ${entry.contextWindow}, max ${entry.maxTokens})`;
+  if (aliasTarget) {
+    return {
+      requestedModel,
+      runtimeModel,
+      alias: requestedModel,
+      entry,
+      note: `model alias ${requestedModel} -> ${entryNote}`,
+    };
+  }
+
+  return {
+    requestedModel,
+    runtimeModel,
+    entry,
+    note: entryNote,
+  };
+}
+
+export function describeModelSelection(driver: RuntimeDriverName, model?: string): string | undefined {
+  return resolveRuntimeModelSelection(driver, model).note;
 }
