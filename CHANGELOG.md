@@ -2,12 +2,16 @@
 
 All notable changes to this repository should be recorded here.
 
+## 0.9.0 - 2026-05-03
+
+### Changed
+- The compact peer-mode user help now uses a persistent user-only notification instead of the lower widget area, avoiding widget truncation without adding help text to the main agent context.
+
 ## 0.8.0 - 2026-05-03
 
 ### Changed
 - Peer slash-command guidance, reports, dashboards, model lists, and history pages now use user-only UI notifications instead of custom chat messages, keeping them out of the main agent context.
 - Agent-facing peer messages remain explicit: the one-time orchestration guide is added to the main agent context, and peer completion/block/failure relays still arrive as wrapped follow-up turns with the latest visible peer message.
-- The compact peer-mode user help now uses a persistent user-only notification instead of the lower widget area, avoiding widget truncation without adding help text to the main agent context.
 
 ## 0.7.0 - 2026-05-03
 
