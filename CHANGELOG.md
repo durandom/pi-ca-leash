@@ -2,13 +2,15 @@
 
 All notable changes to this repository should be recorded here.
 
+## 0.10.0 - 2026-05-03
+
+### Fixed
+- Newly started peers now relay their first real `waiting`, `idle`, or `error` transition into the main context instead of suppressing the initial `needs input` signal.
+
 ## 0.9.0 - 2026-05-03
 
 ### Changed
 - The compact peer-mode user help now uses a persistent user-only notification instead of the lower widget area, avoiding widget truncation without adding help text to the main agent context.
-
-### Fixed
-- Newly started peers now relay their first real `waiting`, `idle`, or `error` transition into the main context instead of suppressing the initial `needs input` signal.
 
 ## 0.8.0 - 2026-05-03
 
