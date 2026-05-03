@@ -122,7 +122,7 @@ The extension is where operator UX lives.
 Activation model:
 - extension load registers slash commands, tools, and renderers only
 - `session_start` does not create the widget, start the background monitor, or run live intercom checks while inactive
-- `/peer init` activates the workflow, adds the one-time orchestration guide to the main agent context, and shows compact user help as a UI notification
+- `/peer init` activates the workflow, adds the one-time orchestration guide to the main agent context, and shows compact user help as a UI widget
 - the first actionable `/peer` command also activates the workflow and adds the agent guide once
 - `/peer help` stays passive and shows user-only UI help
 - after activation, the background monitor handles broker connectivity, attention notifications, peer relays, and visible dashboard refreshes
@@ -134,7 +134,7 @@ Context boundary:
 
 Prompt files:
 - `extensions/prompts/peer-init.md` is the one-time main-agent orchestration guide added when peer mode is first activated
-- `extensions/prompts/peer-init-user-help.md` is the compact user-facing command cheat sheet shown as a UI notification with peer-mode activation
+- `extensions/prompts/peer-init-user-help.md` is the compact user-facing command cheat sheet shown as a UI widget with peer-mode activation
 - `extensions/prompts/peer-no-babysitting.md` is included in peer start acknowledgments
 - `extensions/prompts/*-tool.md` files provide LLM-callable tool snippets/guidelines
 - `extensions/prompts/peer-bridge-system.md` is appended to runtime-backed peer sessions

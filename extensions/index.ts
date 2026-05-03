@@ -78,6 +78,7 @@ const STATE_DIR_NAME = ".pi-ca-leash";
 const BACKGROUND_POLL_INTERVAL_MS = 5_000;
 const BACKGROUND_REFRESH_MIN_INTERVAL_MS = 3_000;
 const DEFAULT_SNOOZE_MINUTES = 15;
+const PEER_INIT_HELP_WIDGET_KEY = "peer-init-help";
 
 interface DashboardSnapshot {
   sessions: number;
@@ -482,13 +483,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         body: PEER_INIT_GUIDE,
         surface: "agent",
       });
-      sendCommandMessage(pi, {
-        level: "info",
-        command: options.command,
-        title: "Peer mode active",
-        body: PEER_INIT_USER_HELP,
-        surface: "custom",
-      });
+      showPeerInitUserHelp(ctx);
     }
     if (runtimeDriverConfig.note && !runtimeDriverFallbackShown) {
       runtimeDriverFallbackShown = true;
@@ -2347,6 +2342,18 @@ function notifyLevel(level: CommandMessageLevel): "info" | "warning" | "error" {
     return "warning";
   }
   return "info";
+}
+
+function showPeerInitUserHelp(ctx: ExtensionContext | ExtensionCommandContext): void {
+  if (process.argv.includes("--no-session")) {
+    return;
+  }
+  const [, ...helpLines] = PEER_INIT_USER_HELP.split(/\r?\n/);
+  ctx.ui.setWidget(
+    PEER_INIT_HELP_WIDGET_KEY,
+    ["Peer mode active", ...helpLines],
+    { placement: "belowEditor" },
+  );
 }
 
 function showUsage(pi: ExtensionAPI, command: string, usage: string): void {

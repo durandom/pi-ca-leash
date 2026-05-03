@@ -183,6 +183,12 @@ function notificationMatching(entries: Array<{ message: string }>, pattern: RegE
   return entry.message;
 }
 
+function widgetLines(widgets: Map<string, unknown>, key: string): string {
+  const widget = widgets.get(key);
+  assert.ok(Array.isArray(widget), `Expected ${key} widget lines`);
+  return widget.join("\n");
+}
+
 test("/peer is the only public slash command by default", async () => {
   const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
   try {
@@ -216,13 +222,12 @@ test("/peer help stays passive while /peer init activates and shows guide", asyn
     assert.match(aboutNotice, /default driver codex-cli/);
     assert.equal(harness.widgets.has("peer-dashboard"), false);
 
-    const initNoticeBefore = harness.notifications.length;
     const initMessages = await harness.run("peer", "init");
     assert.match(String(initMessages.at(0)?.message?.details?.title ?? ""), /Agent orchestration guide/);
     assert.equal(initMessages.at(0)?.message?.details?.surface, "agent");
     assert.equal(initMessages.length, 1);
 
-    const userHelp = notificationMatching(harness.notifications.slice(initNoticeBefore), /Peer mode active/);
+    const userHelp = widgetLines(harness.widgets, "peer-init-help");
     assert.match(userHelp, /Common commands:/);
     assert.match(userHelp, /\/peer start <prompt>/);
     assert.match(userHelp, /\/peer help/);
@@ -234,6 +239,7 @@ test("/peer help stays passive while /peer init activates and shows guide", asyn
     assert.match(agentGuide, /Use `peer_history` like a human scrolling back/);
     assert.match(agentGuide, /extension_log/);
     assert.equal(harness.widgets.has("peer-dashboard"), true);
+    assert.equal(harness.widgets.has("peer-init-help"), true);
   } finally {
     await harness.close();
   }
@@ -248,7 +254,7 @@ test("first actionable /peer command activates and shows guide once", async () =
     assert.equal(firstMessages.at(0)?.message?.details?.surface, "agent");
     assert.equal(firstMessages.length, 1);
     const firstNotices = harness.notifications.slice(noticeBefore);
-    assert.match(notificationMatching(firstNotices, /Peer mode active/), /\/peer help/);
+    assert.match(widgetLines(harness.widgets, "peer-init-help"), /\/peer help/);
     assert.match(messageBody(firstMessages, /Agent orchestration guide/), /How to work with pi-ca-leash:/);
     assert.match(notificationMatching(firstNotices, /Runtime models/), /codex-cli models/);
     assert.equal(harness.widgets.has("peer-dashboard"), true);

@@ -141,7 +141,7 @@ PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1 PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1 pi
 
 ## Behavior
 
-The extension is lazy. Loading it registers commands and tools, but it does not start the Peers widget, background monitor, or intercom transport checks immediately. `/peer init` activates the peer workflow, adds the one-time orchestration guide to the main agent context, and shows the user a compact command cheat sheet as a UI notification. The first actionable `/peer` command, such as `/peer models`, `/peer dashboard`, `/peer list`, or `/peer start`, also activates it and adds that agent guide once. `/peer help` and `/peer about` stay passive and show user-only UI notifications. `/peer about` reports the installed package version, package root, state root, default driver, and session mode.
+The extension is lazy. Loading it registers commands and tools, but it does not start the Peers widget, background monitor, or intercom transport checks immediately. `/peer init` activates the peer workflow, adds the one-time orchestration guide to the main agent context, and shows the user a compact command cheat sheet as a UI widget. The first actionable `/peer` command, such as `/peer models`, `/peer dashboard`, `/peer list`, or `/peer start`, also activates it and adds that agent guide once. `/peer help` and `/peer about` stay passive and show user-only UI notifications. `/peer about` reports the installed package version, package root, state root, default driver, and session mode.
 
 Peers are asynchronous workers. The main agent should start a peer, continue useful work, and wait for the automatic peer completion, blocked, or failure relay. It should not poll `peer_list`, `peer_history`, or repeated `peer_ask` just to see whether the peer is done.
 
