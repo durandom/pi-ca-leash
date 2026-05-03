@@ -19,6 +19,7 @@ import {
 import { formatPeerHistoryPage } from "./peer-history.js";
 import { buildPeerActivityRow, getPeerFirstHealth, isPeerVisibleInWidget, type PeerActivityRow } from "./peer-ux.js";
 import { parseRuntimeDriverName, resolveExtensionRuntimeDriverConfig } from "./runtime-driver.js";
+import { describeModelSelection, modelCatalogsForDriver, type RuntimeDriverModelCatalog } from "./model-catalog.js";
 import { parseSubagentRunToolInput, parseTeamSpawnToolInput } from "./tool-inputs.js";
 import { parsePeerStartCommandInput, parseSubagentRunCommandInput, parseTeamSpawnCommandInput } from "./command-drivers.js";
 import { buildSubagentRunRequest, buildTeamSpawnRequest } from "./backend-tool-actions.js";
@@ -438,6 +439,40 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "runtime_models",
+    label: "Runtime Models",
+    description: "List the bundled Lanista-derived model catalog for Claude SDK and Codex CLI runtime drivers.",
+    promptSnippet: "Inspect available model ids for claude-sdk and codex-cli before passing a model override to peer_start, peer_ask, subagent_run, or team_spawn.",
+    promptGuidelines: [
+      "Use `runtime_models` before choosing a non-default model.",
+      "Use `driver` to narrow results to `claude-sdk` or `codex-cli`.",
+      "Catalog entries are advisory; provider and CLI entitlements can drift, so unknown model ids are passed through to the runtime.",
+    ],
+    parameters: {
+      type: "object",
+      properties: {
+        driver: { type: "string", enum: ["claude-sdk", "codex-cli"], description: "Optional runtime driver to filter the model catalog." },
+      },
+      additionalProperties: false,
+    } as any,
+    async execute(_toolCallId, params) {
+      const input = params as { driver?: unknown };
+      const driver = input.driver == null ? undefined : parseRuntimeDriverName(input.driver);
+      if (input.driver != null && !driver) {
+        throw new Error("driver must be claude-sdk or codex-cli");
+      }
+      const catalogs = modelCatalogsForDriver(driver);
+      return {
+        content: [{
+          type: "text",
+          text: formatModelCatalogReport(catalogs),
+        }],
+        details: { catalogs },
+      };
+    },
+  });
+
+  pi.registerTool({
     name: "peer_start",
     label: "Start Peer",
     description: "Start a long-lived runtime-backed peer from a prompt, optionally with an explicit name, driver, model, and working directory.",
@@ -446,6 +481,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       "Use `peer_start` when you want a reusable long-lived peer instead of solving the task in the current turn.",
       "Pass `name` only when you need a stable explicit peer name; otherwise let the tool auto-name from prompt.",
       "Pass `driver` when you need to force `claude-sdk` or `codex-cli` for this peer instead of using the extension default.",
+      "Call `runtime_models` first when you need the supported model ids for a driver.",
       "Pass `model` and `cwd` when you need a specific model and working directory.",
     ],
     parameters: {
@@ -473,6 +509,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       if (input.driver != null && !driver) {
         throw new Error("driver must be claude-sdk or codex-cli");
       }
+      const effectiveDriver = driver ?? runtimeDriverConfig.defaultDriver;
+      const modelNote = describeModelSelection(effectiveDriver, model);
 
       const existingNames = new Set((await bridge.listPeers()).map((peer) => peer.name));
       const name = explicitName || derivePeerName(prompt, existingNames);
@@ -496,6 +534,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           !explicitName ? `auto-name ${peer.name}` : undefined,
           `state ${row.state}`,
           `driver ${peer.driver ?? "claude-sdk"}`,
+          modelNote,
           `session ${peer.sessionId}`,
           "",
           PEER_NO_BABYSITTING_GUIDANCE,
@@ -511,12 +550,13 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
             `state ${row.state}`,
             `driver ${peer.driver ?? "claude-sdk"}`,
             `model ${peer.model ?? "-"}`,
+            modelNote,
             `cwd ${peer.cwd}`,
             `session ${peer.sessionId}`,
             message ? `latest peer message\n${formatQuotedTextBlock(message)}` : undefined,
           ].filter(Boolean).join("\n\n"),
         }],
-        details: { peerName: peer.name, state: row.state, sessionId: peer.sessionId, driver: peer.driver, model: peer.model, cwd: peer.cwd, guidance: PEER_NO_BABYSITTING_GUIDANCE },
+        details: { peerName: peer.name, state: row.state, sessionId: peer.sessionId, driver: peer.driver, model: peer.model, modelNote, cwd: peer.cwd, guidance: PEER_NO_BABYSITTING_GUIDANCE },
       };
     },
   });
@@ -650,6 +690,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     promptGuidelines: [
       "Use `peer_ask` only with an existing peer name.",
       "Prefer concise direct asks because the peer reply is returned into the current turn.",
+      "Call `runtime_models` first when you need the supported model ids for a driver.",
       "Pass `model` when you want this peer to switch models for this and future asks.",
     ],
     parameters: {
@@ -670,12 +711,15 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       if (!name || !message) {
         throw new Error("name and message required");
       }
+      const currentPeer = await bridge.status(name).catch(() => undefined);
+      const effectiveDriver = currentPeer?.driver ?? runtimeDriverConfig.defaultDriver;
+      const modelNote = model ? describeModelSelection(effectiveDriver, model) : undefined;
 
       sendCommandMessage(pi, {
         level: "info",
         command: "peer_ask",
         title: `Sent to peer: ${name}`,
-        body: formatQuotedTextBlock(truncate(message, 4_000)),
+        body: [modelNote, formatQuotedTextBlock(truncate(message, 4_000))].filter(Boolean).join("\n\n"),
       });
 
       const result = await bridge.ask(name, {
@@ -699,10 +743,11 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
             `state ${row.state}`,
             `driver ${result.peer.driver ?? "claude-sdk"}`,
             `model ${result.peer.model ?? "-"}`,
+            modelNote,
             `quoted peer message\n${formatQuotedTextBlock(visibleReply)}`,
           ].filter(Boolean).join("\n\n"),
         }],
-        details: { peerName: name, state: row.state, sessionId: result.peer.sessionId, driver: result.peer.driver, model: result.peer.model, cwd: result.peer.cwd, message, reply: result.reply, deliveryState: result.deliveryState },
+        details: { peerName: name, state: row.state, sessionId: result.peer.sessionId, driver: result.peer.driver, model: result.peer.model, modelNote, cwd: result.peer.cwd, message, reply: result.reply, deliveryState: result.deliveryState },
       };
     },
   });
@@ -716,6 +761,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       "Use `peer_send` instead of `peer_ask` when you do not need an immediate reply.",
       "Do not use it to poll for status; wait for automated peer updates.",
       "If the peer is busy, wait for its automated update before sending more input.",
+      "Call `runtime_models` first when you need the supported model ids for a driver.",
     ],
     parameters: {
       type: "object",
@@ -735,12 +781,15 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       if (!name || !message) {
         throw new Error("name and message required");
       }
+      const currentPeer = await bridge.status(name).catch(() => undefined);
+      const effectiveDriver = currentPeer?.driver ?? runtimeDriverConfig.defaultDriver;
+      const modelNote = model ? describeModelSelection(effectiveDriver, model) : undefined;
 
       sendCommandMessage(pi, {
         level: "info",
         command: "peer_send",
         title: `Sent to peer: ${name}`,
-        body: formatQuotedTextBlock(truncate(message, 4_000)),
+        body: [modelNote, formatQuotedTextBlock(truncate(message, 4_000))].filter(Boolean).join("\n\n"),
       });
 
       const peer = await bridge.send(name, {
@@ -761,9 +810,10 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
             `state ${row.state}`,
             `driver ${peer.driver ?? "claude-sdk"}`,
             `model ${peer.model ?? "-"}`,
-          ].join("\n\n"),
+            modelNote,
+          ].filter(Boolean).join("\n\n"),
         }],
-        details: { peerName: name, state: row.state, sessionId: peer.sessionId, driver: peer.driver, model: peer.model, cwd: peer.cwd, message, deliveryState: "delivered_and_running" },
+        details: { peerName: name, state: row.state, sessionId: peer.sessionId, driver: peer.driver, model: peer.model, modelNote, cwd: peer.cwd, message, deliveryState: "delivered_and_running" },
       };
     },
   });
@@ -913,6 +963,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     promptGuidelines: [
       "Use `subagent_run` when you need a bounded delegated run instead of a reusable peer.",
       "Pass `driver` to force `claude-sdk` or `codex-cli` for this run instead of using the extension default.",
+      "Call `runtime_models` first when you need the supported model ids for a driver.",
       "Pass `async: true` when you want to launch a background run and inspect it later with `subagent_status` or `subagent_list`.",
     ],
     parameters: {
@@ -931,6 +982,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const input = parseSubagentRunToolInput(params as { task?: unknown; name?: unknown; prompt?: unknown; driver?: unknown; model?: unknown; cwd?: unknown; async?: unknown });
+      const effectiveDriver = input.driver ?? runtimeDriverConfig.defaultDriver;
+      const modelNote = describeModelSelection(effectiveDriver, input.model);
 
       const run = await subagents.startRun(buildSubagentRunRequest(input, cwd));
       await syncAttentionLedger();
@@ -942,6 +995,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
             `Run ${run.state}: ${shortId(run.runId)}`,
             `agent ${run.agentName}`,
             `driver ${run.driver ?? runtimeDriverConfig.defaultDriver}`,
+            modelNote,
             `state ${run.state}`,
             `cwd ${run.cwd}`,
             run.sessionId ? `session ${run.sessionId}` : undefined,
@@ -952,6 +1006,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           runId: run.runId,
           agentName: run.agentName,
           driver: run.driver,
+          model: run.model,
+          modelNote,
           state: run.state,
           cwd: run.cwd,
           sessionId: run.sessionId,
@@ -1071,6 +1127,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     promptGuidelines: [
       "Use `team_spawn` for a persistent named worker, not for one-off bounded work.",
       "Pass `driver` to force `claude-sdk` or `codex-cli` for this teammate instead of using the extension default.",
+      "Call `runtime_models` first when you need the supported model ids for a driver.",
     ],
     parameters: {
       type: "object",
@@ -1086,6 +1143,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const input = parseTeamSpawnToolInput(params as { name?: unknown; prompt?: unknown; driver?: unknown; model?: unknown; cwd?: unknown });
+      const effectiveDriver = input.driver ?? runtimeDriverConfig.defaultDriver;
+      const modelNote = describeModelSelection(effectiveDriver, input.model);
 
       await ensureIntercomTransportHealthy(false);
       const teammate = await teams.spawnTeammate(buildTeamSpawnRequest(input, cwd));
@@ -1097,12 +1156,13 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           text: [
             `Teammate spawned: ${teammate.name}`,
             `driver ${teammate.driver ?? runtimeDriverConfig.defaultDriver}`,
+            modelNote,
             `state ${teammate.state}`,
             `cwd ${teammate.cwd}`,
             `session ${teammate.sessionId ?? "-"}`,
           ].join("\n\n"),
         }],
-        details: teammate,
+        details: { ...teammate, modelNote },
       };
     },
   });
@@ -1321,7 +1381,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     if (!parsed.prompt || hasPlaceholderToken(parsed.name, parsed.prompt)) {
       showUsage(pi, command, [
         `/${command} <prompt>`,
+        `/${command} <prompt> | <driver> | <model>`,
         `/${command} <name> | <prompt>`,
+        `/${command} <name> | <prompt> | <driver> | <model>`,
         `Example: /${command} Review auth flow and reply briefly.`,
         `Example: /${command} reviewer | You are a brief worker. Reply briefly.`,
       ].join("\n"));
@@ -1330,6 +1392,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
 
     const existingNames = new Set((await bridge.listPeers()).map((peer) => peer.name));
     const name = parsed.name ?? derivePeerName(parsed.prompt, existingNames);
+    const effectiveDriver = parsed.driver ?? runtimeDriverConfig.defaultDriver;
+    const modelNote = describeModelSelection(effectiveDriver, parsed.model);
 
     sendCommandMessage(pi, {
       level: "info",
@@ -1338,6 +1402,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       body: [
         parsed.autoNamed ? `auto-named from prompt\n\n${truncate(parsed.prompt, 160)}` : "Watch Peers widget for live activity.",
         parsed.driver ? `driver ${parsed.driver}` : undefined,
+        modelNote,
       ].filter(Boolean).join("\n\n"),
     });
 
@@ -1346,6 +1411,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       name,
       prompt: parsed.prompt,
       driver: parsed.driver,
+      model: parsed.model,
       cwd,
       permissionMode: "bypassPermissions",
     });
@@ -1359,6 +1425,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         parsed.autoNamed ? `auto-name ${peer.name}` : undefined,
         `state ${peer.state}`,
         `driver ${peer.driver ?? "claude-sdk"}`,
+        modelNote,
         `session ${peer.sessionId}`,
         "",
         PEER_NO_BABYSITTING_GUIDANCE,
@@ -1376,6 +1443,22 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       command,
       title: `Peers (${data.peers.length})`,
       body: formatPeerList(data.snapshot.peerRows),
+    });
+  }
+
+  async function handlePeerModelsCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
+    const rawDriver = args.trim();
+    const driver = rawDriver ? parseRuntimeDriverName(rawDriver) : undefined;
+    if (rawDriver && !driver) {
+      throw new Error("driver must be claude-sdk or codex-cli");
+    }
+    const catalogs = modelCatalogsForDriver(driver);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, "Runtime models");
+    sendCommandMessage(pi, {
+      level: "info",
+      command,
+      title: driver ? `Runtime models: ${driver}` : "Runtime models",
+      body: formatModelCatalogReport(catalogs),
     });
   }
 
@@ -1584,10 +1667,13 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       `/${command} or /${command} dashboard`,
       `/${command} dashboard advanced`,
       `/${command} start <prompt>`,
+      `/${command} start <prompt> | <driver> | <model>`,
       `/${command} start <name> | <prompt>`,
+      `/${command} start <name> | <prompt> | <driver> | <model>`,
       `/${command} ask <name> | <message>`,
       `/${command} send <name> | <message>`,
       `/${command} list`,
+      `/${command} models [claude-sdk|codex-cli]`,
       `/${command} history <name> [cursor] [limit]`,
       `/${command} interrupt <name>`,
       `/${command} stop <name>`,
@@ -1595,7 +1681,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     ].join("\n"));
   }
 
-  registerExtensionCommand(pi, "peer", "Peer dashboard and controls. Args: [dashboard|start|ask|send|list|history|interrupt|stop] ...", async (args, ctx) => {
+  registerExtensionCommand(pi, "peer", "Peer dashboard and controls. Args: [dashboard|start|ask|send|list|models|history|interrupt|stop] ...", async (args, ctx) => {
     const trimmed = args.trim();
     if (!trimmed) {
       await handleDashboardCommand("", ctx, "peer");
@@ -1621,6 +1707,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         return;
       case "list":
         await handlePeerListCommand(ctx, "peer list");
+        return;
+      case "models":
+        await handlePeerModelsCommand(rest, ctx, "peer models");
         return;
       case "history":
         await handlePeerHistoryCommand(rest, ctx, "peer history");
@@ -2145,7 +2234,7 @@ function completePeerCommand(prefix: string, names: Set<string>): AutocompleteIt
   const trimmedStart = prefix.trimStart();
   const [subcommand = "", ...restParts] = trimmedStart.split(/\s+/);
   const endsWithSpace = /\s$/.test(trimmedStart);
-  const subcommands = ["dashboard", "start", "ask", "send", "list", "history", "interrupt", "stop", "help"];
+  const subcommands = ["dashboard", "start", "ask", "send", "list", "models", "history", "interrupt", "stop", "help"];
 
   if (!subcommand || (!endsWithSpace && restParts.length === 0)) {
     const matches = subcommands
@@ -2159,6 +2248,13 @@ function completePeerCommand(prefix: string, names: Set<string>): AutocompleteIt
   }
   if (["history", "interrupt", "stop"].includes(subcommand)) {
     return completePeerName(restParts.join(" "), names, false);
+  }
+  if (subcommand === "models") {
+    const trimmed = restParts.join(" ").trim();
+    const items = ["claude-sdk", "codex-cli"]
+      .filter((driver) => trimmed.length === 0 || driver.startsWith(trimmed))
+      .map((driver) => ({ value: driver, label: driver }));
+    return items.length > 0 ? items : null;
   }
   return null;
 }
@@ -2376,6 +2472,28 @@ function formatAttentionReport(attention: AttentionView[]): string {
       truncate(view.run.note ?? "", 72),
     ]),
   );
+}
+
+function formatModelCatalogReport(catalogs: RuntimeDriverModelCatalog[]): string {
+  return catalogs.map((catalog) => {
+    const rows = catalog.models.map((model) => [
+      model.id === catalog.defaultModel ? `${model.id} *` : model.id,
+      model.name,
+      String(model.contextWindow),
+      String(model.maxTokens),
+      model.reasoning ? "yes" : "no",
+      `$${model.inputCostPerMillion}/$${model.outputCostPerMillion}`,
+    ]);
+    return [
+      `${catalog.driver} models`,
+      `provider ${catalog.provider}`,
+      `default ${catalog.defaultModel}`,
+      `cli ${catalog.flag}`,
+      `source ${catalog.source}`,
+      "",
+      formatTable(["model", "name", "ctx", "max", "reasoning", "$/M in/out"], rows),
+    ].join("\n");
+  }).join("\n\n");
 }
 
 function formatTable(headers: string[], rows: string[][]): string {

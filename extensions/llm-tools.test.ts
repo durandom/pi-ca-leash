@@ -11,6 +11,7 @@ const repoRoot = resolve(__dirname, "..");
 const extensionModuleUrl = pathToFileURL(join(__dirname, "index.ts")).href;
 
 const TOOL_NAMES = [
+  "runtime_models",
   "peer_start",
   "peer_list",
   "peer_history",
@@ -167,6 +168,20 @@ test("extension registers expected LLM-callable tools", async () => {
   const harness = await loadExtensionHarness("codex-cli");
   try {
     assert.deepEqual([...harness.tools.keys()].sort(), [...TOOL_NAMES].sort());
+  } finally {
+    await harness.close();
+  }
+});
+
+test("runtime_models exposes driver-specific Lanista catalog", async () => {
+  const harness = await loadExtensionHarness("codex-cli");
+  try {
+    const listed = await harness.execute("runtime_models", { driver: "codex-cli" });
+    const text = String(listed.content?.[0]?.text ?? "");
+    assert.match(text, /codex-cli models/);
+    assert.match(text, /default gpt-5\.5/);
+    assert.match(text, /gpt-5\.4-mini/);
+    assert.equal(listed.details.catalogs[0].driver, "codex-cli");
   } finally {
     await harness.close();
   }

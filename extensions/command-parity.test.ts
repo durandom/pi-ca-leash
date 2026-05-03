@@ -232,13 +232,30 @@ test("/peer start honors codex default and explicit driver forms", async () => {
 
   const overrideHarness = await loadCommandHarness({ defaultDriver: "claude-sdk" });
   try {
-    const startMessages = await overrideHarness.run("peer", "start" + " " + "reviewer | Review auth flow and reply briefly. | codex-cli");
+    const startMessages = await overrideHarness.run("peer", "start" + " " + "reviewer | Review auth flow and reply briefly. | codex-cli | gpt-5.4-mini");
     assert.match(latestBody(startMessages), /driver codex-cli/);
+    assert.match(latestBody(startMessages), /gpt-5\.4-mini/);
 
     const listMessages = await overrideHarness.run("peer", "list");
     assert.match(latestBody(listMessages), /codex-cli/);
   } finally {
     await overrideHarness.close();
+  }
+});
+
+test("/peer models lists bundled runtime model catalog", async () => {
+  const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
+  try {
+    const allMessages = await harness.run("peer", "models");
+    assert.match(latestBody(allMessages), /claude-sdk models/);
+    assert.match(latestBody(allMessages), /codex-cli models/);
+
+    const codexMessages = await harness.run("peer", "models codex-cli");
+    assert.match(latestBody(codexMessages), /default gpt-5\.5/);
+    assert.match(latestBody(codexMessages), /gpt-5\.4-mini/);
+    assert.doesNotMatch(latestBody(codexMessages), /claude-opus-4-7/);
+  } finally {
+    await harness.close();
   }
 });
 

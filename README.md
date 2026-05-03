@@ -72,10 +72,13 @@ Primary slash-command surface:
 /peer dashboard
 /peer dashboard advanced
 /peer start <prompt>
+/peer start <prompt> | <driver> | <model>
 /peer start <name> | <prompt>
+/peer start <name> | <prompt> | <driver> | <model>
 /peer ask <name> | <message>
 /peer send <name> | <message>
 /peer list
+/peer models [claude-sdk|codex-cli]
 /peer history <name> [cursor] [limit]
 /peer interrupt <name>
 /peer stop <name>
@@ -86,6 +89,7 @@ Quick check inside pi:
 
 ```text
 /peer start reviewer | Review this repo briefly and report one concrete risk.
+/peer models codex-cli
 /peer ask reviewer | Reply with exactly: peer-ok
 /peer list
 /peer dashboard advanced
@@ -94,6 +98,7 @@ Quick check inside pi:
 LLM-callable peer tools:
 
 ```text
+runtime_models(driver?)
 peer_start(prompt, name?, driver?, model?, cwd?)
 peer_list()
 peer_history(name, cursor?, limit?)
@@ -142,8 +147,10 @@ Runtime driver notes:
 - `claude-sdk` is the default and most complete path
 - `codex-cli` is experimental
 - `PI_CLAUDE_RUNTIME_DRIVER=codex-cli` changes the default for newly started peers
-- LLM-callable `peer_start`, `subagent_run`, and `team_spawn` can pass an explicit driver
-- slash-command and visual UX intentionally stay driver-light
+- `/peer models` and LLM-callable `runtime_models` expose a bundled Lanista-derived model catalog
+- LLM-callable `peer_start`, `peer_ask`, `peer_send`, `subagent_run`, and `team_spawn` can pass explicit model ids
+- `/peer start` can pass driver and model in pipe syntax
+- catalog validation is advisory; unknown model ids are still passed through to the runtime because provider and CLI availability is environment-dependent
 
 ## Repository Layout
 

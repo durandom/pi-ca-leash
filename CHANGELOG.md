@@ -5,6 +5,9 @@ All notable changes to this repository should be recorded here.
 ## Unreleased
 
 ### Changed
+- Added a bundled Lanista-derived runtime model catalog for `claude-sdk` and `codex-cli`, exposed through `runtime_models` and `/peer models`.
+- `/peer start` can now include explicit driver and model fields in pipe syntax.
+- Runtime tool guidance now points agents to `runtime_models` before choosing non-default model ids.
 - Polished README setup, persistence, and runtime-driver wording around the current local MVP.
 - Aligned workspace package versions with the root `0.2.0` package version.
 - Reworked README into the single practical entrypoint, with the useful manual smoke and peer no-polling guidance folded in.

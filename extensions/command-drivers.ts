@@ -5,6 +5,7 @@ export interface ParsedPeerStartCommandInput {
   name?: string;
   prompt: string;
   driver?: RuntimeDriverName;
+  model?: string;
   autoNamed: boolean;
 }
 
@@ -45,17 +46,39 @@ export function parsePeerStartCommandInput(args: string): ParsedPeerStartCommand
       autoNamed: false,
     };
   }
-  if (parts.length > 3) {
-    throw new Error("usage: <prompt> | [driver] OR <name> | <prompt> | [driver]");
+  if (parts.length > 4) {
+    throw new Error("usage: <prompt> | [driver] | [model] OR <name> | <prompt> | [driver] | [model]");
+  }
+  if (parts.length === 3) {
+    const autoNamedDriver = parseRuntimeDriverName(parts[1]);
+    if (autoNamedDriver) {
+      return {
+        prompt: parts[0] ?? "",
+        driver: autoNamedDriver,
+        model: parts[2] ?? undefined,
+        autoNamed: true,
+      };
+    }
+    const driver = parseRuntimeDriverName(parts[2]);
+    if (!driver) {
+      throw new Error("driver must be claude-sdk or codex-cli when using a driver-aware peer start form");
+    }
+    return {
+      name: parts[0],
+      prompt: parts[1] ?? "",
+      driver,
+      autoNamed: false,
+    };
   }
   const driver = parseRuntimeDriverName(parts[2]);
   if (!driver) {
-    throw new Error("driver must be claude-sdk or codex-cli when using <name> | <prompt> | <driver>");
+    throw new Error("driver must be claude-sdk or codex-cli when using <name> | <prompt> | <driver> | <model>");
   }
   return {
     name: parts[0],
     prompt: parts[1] ?? "",
     driver,
+    model: parts[3] ?? undefined,
     autoNamed: false,
   };
 }

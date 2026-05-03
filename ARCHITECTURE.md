@@ -102,6 +102,7 @@ Truth:
 
 Path:
 - `extensions/index.ts`
+- `extensions/model-catalog.ts`
 
 Responsibility:
 - wire runtime + bridge + backends into a pi extension
@@ -111,8 +112,63 @@ Responsibility:
 - monitor live broker transport connectivity
 - surface attention notifications
 - persist local attention ack/snooze state
+- expose a bundled, advisory model catalog for runtime model selection
 
 The extension is where operator UX lives.
+
+### Model catalog layer
+
+Path:
+- `extensions/model-catalog.ts`
+
+Responsibility:
+- map runtime drivers to model-provider catalogs
+- expose known model ids, labels, context windows, token limits, modality flags, and rough per-million-token costs
+- provide advisory model-selection notes for `/peer`, `runtime_models`, and LLM-callable runtime tools
+
+Current mapping:
+- `claude-sdk` uses the Lanista `anthropic` catalog and passes models to the Claude SDK / Claude Code runtime.
+- `codex-cli` uses the Lanista `openai-codex` catalog and passes models as `codex -m` / `codex --model` compatible ids.
+
+Important consequence:
+- the catalog is not an entitlement authority
+- unknown model ids are passed through to the runtime instead of being hard-rejected
+- actual availability can still differ by installed CLI version, account, region, and provider rollout state
+
+## Updating the Model Catalog with Lanista
+
+The bundled catalog is a static snapshot so `pi-ca-leash` does not need `lanista` at runtime.
+
+To refresh it from Lanista:
+
+```bash
+cd /Users/mhild/src/durandom/b4arena/lanista
+.venv/bin/lanista fetch
+.venv/bin/lanista --json agents anthropic
+.venv/bin/lanista --json agents codex
+```
+
+Then copy the relevant provider records into `extensions/model-catalog.ts`:
+- Lanista `anthropic` -> `RUNTIME_MODEL_CATALOGS["claude-sdk"]`
+- Lanista `openai-codex` -> `RUNTIME_MODEL_CATALOGS["codex-cli"]`
+
+Keep these fields when updating entries:
+- model id
+- display name
+- context window
+- max output tokens
+- reasoning flag
+- input modalities
+- input and output cost per million tokens
+
+After updating the snapshot:
+
+```bash
+npm test
+npm run build
+```
+
+Do not add a runtime dependency from this repo to Lanista unless the extension needs live model refresh. The default should stay deterministic and offline-friendly.
 
 ## Runtime-first design rationale
 

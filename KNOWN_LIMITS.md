@@ -23,9 +23,10 @@ This file is intentionally blunt.
    - Per-peer driver override exists on the LLM-callable `peer_start` tool.
    - Public slash-command peer docs stay driver-agnostic; treat Codex selection as experimental even where compatibility paths can thread it.
    - Subagents and teams backend APIs, demo CLIs, and LLM-callable tools can thread driver selection, but slash-command/visual extension UX still does not expose subagent/team driver selection.
+   - The bundled model catalog is advisory and generated from Lanista snapshots; it does not prove that the local CLI or account can use every listed model.
    - Workspace tests do not require a real `codex` binary, but local smoke validation can use a real one.
    - Context-window percentage is currently Claude SDK-derived only; Codex-backed peers show no `ctx` value unless a trustworthy context window can be derived later.
-   - Codex effective default model is only shown when explicitly requested or reported by Codex JSON events.
+   - Codex effective default model can be shown from the bundled catalog, but the runtime still trusts the Codex CLI for actual model resolution.
 
 ## Runtime/host limits
 
