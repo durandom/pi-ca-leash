@@ -314,6 +314,28 @@ test("interrupt signals a busy peer and keeps it registered", async () => {
   assert.ok(await bridge.status("worker"));
 });
 
+test("interruptWithResult reports whether the runtime was signalled", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir, driver: new SlowResumeDriver() });
+  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, pollIntervalMs: 5, askTimeoutMs: 10 });
+
+  await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+
+  const idleResult = await bridge.interruptWithResult("worker");
+  assert.equal(idleResult.peer.name, "worker");
+  assert.equal(idleResult.interrupt.interrupted, false);
+  assert.equal(idleResult.interrupt.reason, "no-active-run");
+
+  await bridge.send("worker", { from: "planner", text: "slow send" }, { waitForIdle: false });
+  const busyResult = await bridge.interruptWithResult("worker");
+
+  assert.equal(busyResult.peer.name, "worker");
+  assert.equal(busyResult.interrupt.interrupted, true);
+  assert.equal(busyResult.interrupt.reason, "signalled");
+  assert.equal(busyResult.interrupt.signal, "SIGINT");
+  assert.equal(["busy", "interrupted"].includes(busyResult.peer.state), true);
+});
+
 test("send and reply both route through runtime send", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
   const runtime = new ClaudeCodeRuntime({ storageDir, driver: new FakeDriver() });

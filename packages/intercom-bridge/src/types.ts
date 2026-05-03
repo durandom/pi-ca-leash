@@ -1,5 +1,6 @@
 import type {
   ClaudeCodeRuntime,
+  InterruptResult,
   RuntimeDriverName,
   RuntimeEvent,
   RuntimeSessionId,
@@ -29,6 +30,11 @@ export interface BridgePeer {
   createdAt: string;
   updatedAt: string;
   lastActivityAt: string;
+}
+
+export interface InterruptPeerResult {
+  peer: BridgePeer;
+  interrupt: InterruptResult;
 }
 
 export interface LaunchPeerInput {

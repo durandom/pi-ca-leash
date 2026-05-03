@@ -3,6 +3,10 @@
   "version": "0.10.0",
   "type": "module",
   "description": "Thin intercom-style bridge for Claude Code runtime sessions",
+  "files": [
+    "dist",
+    "package.json"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -19,8 +23,8 @@
     "test": "node --test --import tsx ./test/**/*.test.ts",
     "demo": "tsx src/cli.ts"
   },
-  "dependencies": {
-    "@pi-claude-code-agent/runtime": "file:../runtime"
+  "peerDependencies": {
+    "@pi-claude-code-agent/runtime": "0.10.0"
   },
   "devDependencies": {
     "tsx": "^4.20.6"

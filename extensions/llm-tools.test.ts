@@ -336,6 +336,28 @@ test("peer_ask returns and displays the outgoing prompt", async () => {
   }
 });
 
+test("peer_interrupt returns explicit delivery status", async () => {
+  const harness = await loadExtensionHarness("codex-cli", { codexDelayMs: 500 });
+  try {
+    const started = await harness.execute("peer_start", { prompt: "Wait briefly, then reply done." });
+    const interrupted = await harness.execute("peer_interrupt", { name: started.details.peerName });
+    const toolText = String(interrupted.content?.[0]?.text ?? "");
+
+    assert.match(toolText, /Peer interrupt requested:/);
+    assert.match(toolText, /signal delivered yes/);
+    assert.match(toolText, /reason signalled/);
+    assert.match(toolText, /resulting state/);
+    assert.match(toolText, /follow-up send/);
+    assert.equal(interrupted.details.interruptDelivered, true);
+    assert.equal(interrupted.details.interruptReason, "signalled");
+    assert.equal(interrupted.details.signal, "SIGINT");
+    assert.equal(["busy", "interrupted"].includes(interrupted.details.peerState), true);
+    assert.equal(typeof interrupted.details.canSendImmediately, "boolean");
+  } finally {
+    await harness.close();
+  }
+});
+
 test("peer tools honor codex default driver through extension execute handlers", async () => {
   const harness = await loadExtensionHarness("codex-cli", { codexDelayMs: 150 });
   try {

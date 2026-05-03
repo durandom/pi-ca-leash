@@ -21,6 +21,7 @@ import type {
   BridgeTransportIncomingMessage,
   BridgeTransportStatus,
   IntercomInboundMessage,
+  InterruptPeerResult,
   LaunchPeerInput,
 } from "./types.js";
 
@@ -114,9 +115,16 @@ export class ClaudeRuntimeIntercomBridge {
   }
 
   async interrupt(name: string): Promise<BridgePeer> {
+    return (await this.interruptWithResult(name)).peer;
+  }
+
+  async interruptWithResult(name: string): Promise<InterruptPeerResult> {
     const peer = this.requirePeer(name);
-    await this.runtime.interrupt(peer.sessionId);
-    return this.syncPeerFromRuntime(name);
+    const interrupt = await this.runtime.interrupt(peer.sessionId);
+    return {
+      peer: await this.syncPeerFromRuntime(name),
+      interrupt,
+    };
   }
 
   async stop(name: string): Promise<BridgePeer> {

@@ -259,20 +259,35 @@ function summarizeError(events: RuntimeEvent[]): string {
 }
 
 function looksLikeWaitingForInput(text: string): boolean {
-  const normalized = text.toLowerCase();
-  if (normalized.includes("need") && normalized.includes("input")) {
+  const normalized = text.toLowerCase().replace(/\s+/g, " ").trim();
+  if (/\b(waiting for|need|needs)\s+(your\s+)?input\b/.test(normalized)) {
     return true;
   }
+  if (/\b(blocked on|blocked until|cannot continue without|can't continue without|need you to|i need you to|i need the|missing required)\b/.test(normalized)) {
+    return true;
+  }
+
+  const finalSentence = extractFinalSentence(text).toLowerCase();
+  if (!finalSentence) {
+    return false;
+  }
+
   return [
-    "please provide",
-    "let me know",
-    "which ",
-    "what ",
-    "can you",
-    "could you",
-    "i need",
-    "share the",
-  ].some((token) => normalized.includes(token)) || normalized.trim().endsWith("?");
+    /^please (provide|share|confirm|clarify|choose|send|attach|tell me|let me know)\b/,
+    /^(can|could|would) you\b/,
+    /^(which|what|where|when|who|how) (file|command|option|path|branch|directory|repo|repository|target|environment|env|approach|version|model|task|slice)\b/,
+    /^(do you want|should i|may i)\b/,
+  ].some((pattern) => pattern.test(finalSentence)) || finalSentence.endsWith("?");
+}
+
+function extractFinalSentence(text: string): string {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim().replace(/^[-*]\s+/, "").replace(/^#{1,6}\s+/, ""))
+    .filter(Boolean);
+  const lastLine = lines.at(-1) ?? "";
+  const sentences = lastLine.match(/[^.!?]+[.!?]?/g)?.map((item) => item.trim()).filter(Boolean) ?? [];
+  return sentences.at(-1) ?? lastLine;
 }
 
 function summarizeReply(text: string): string {

@@ -2,7 +2,7 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { ClaudeRuntimeIntercomBridge, extractReplyText, type BridgePeer, PiIntercomTransport } from "@pi-claude-code-agent/intercom-bridge";
-import { ClaudeCodeRuntime, type RuntimeEvent, type RuntimeMessageBlock } from "@pi-claude-code-agent/runtime";
+import { ClaudeCodeRuntime, type InterruptResult, type RuntimeEvent, type RuntimeMessageBlock } from "@pi-claude-code-agent/runtime";
 import { ClaudeCodeSubagentBackend } from "@pi-claude-code-agent/subagents-backend";
 import { ClaudeCodeTeamsBackend } from "@pi-claude-code-agent/teams-backend";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
@@ -388,6 +388,18 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     peerRelaySnapshots.set(peer.name, snapshot);
     suppressNextPeerRelay.delete(peer.name);
     return { row, message };
+  }
+
+  async function interruptPeer(name: string): Promise<{ peer: BridgePeer; interrupt: InterruptResult }> {
+    const current = await bridge.status(name);
+    if (!current) {
+      throw new Error(`Unknown peer ${name}`);
+    }
+    const interrupt = await runtime.interrupt(current.sessionId);
+    return {
+      peer: await bridge.status(name) ?? current,
+      interrupt,
+    };
   }
 
   async function relayPeerCompletionToMain(peer: BridgePeer, options: { force?: boolean; reply?: string } = {}): Promise<boolean> {
@@ -972,22 +984,45 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         throw new Error("name required");
       }
 
-      const peer = await bridge.interrupt(name);
+      const { peer, interrupt } = await interruptPeer(name);
       peerNameCache.add(name);
       const { row } = await syncPeerRelaySnapshot(peer);
+      const canSendImmediately = !["busy", "starting"].includes(peer.state);
+      const interruptLines = [
+        `Peer interrupt requested: ${name}`,
+        `signal delivered ${interrupt.interrupted ? "yes" : "no"}`,
+        `reason ${interrupt.reason}`,
+        interrupt.signal ? `signal ${interrupt.signal}` : undefined,
+        `resulting state ${peer.state}`,
+        row.state !== peer.state ? `dashboard state ${row.state}` : undefined,
+        `follow-up send ${canSendImmediately ? "available now" : "wait until peer leaves busy/starting"}`,
+        `session ${peer.sessionId}`,
+      ].filter(Boolean) as string[];
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer interrupted: ${name}`);
       sendCommandMessage(pi, {
         level: "warning",
         command: "peer_interrupt",
         title: `Peer interrupted: ${name}`,
-        body: [`state ${row.state}`, `session ${peer.sessionId}`].join("\n"),
+        body: interruptLines.slice(1).join("\n"),
       });
       return {
         content: [{
           type: "text",
-          text: [`Peer interrupted: ${name}`, `state ${row.state}`, `session ${peer.sessionId}`].join("\n\n"),
+          text: interruptLines.join("\n\n"),
         }],
-        details: { peerName: name, state: row.state, sessionId: peer.sessionId, driver: peer.driver, model: peer.model, cwd: peer.cwd },
+        details: {
+          peerName: name,
+          state: row.state,
+          peerState: peer.state,
+          sessionId: peer.sessionId,
+          driver: peer.driver,
+          model: peer.model,
+          cwd: peer.cwd,
+          interruptDelivered: interrupt.interrupted,
+          interruptReason: interrupt.reason,
+          signal: interrupt.signal,
+          canSendImmediately,
+        },
       };
     },
   });
@@ -1741,15 +1776,23 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     }
     await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
 
-    const peer = await bridge.interrupt(name);
+    const { peer, interrupt } = await interruptPeer(name);
     suppressNextPeerRelay.delete(name);
     peerNameCache.add(name);
     await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer interrupted: ${peer.name}`);
+    const canSendImmediately = !["busy", "starting"].includes(peer.state);
     sendCommandMessage(pi, {
       level: "warning",
       command,
       title: `Peer interrupted: ${peer.name}`,
-      body: [`state ${peer.state}`, `session ${peer.sessionId}`].join("\n"),
+      body: [
+        `signal delivered ${interrupt.interrupted ? "yes" : "no"}`,
+        `reason ${interrupt.reason}`,
+        interrupt.signal ? `signal ${interrupt.signal}` : undefined,
+        `resulting state ${peer.state}`,
+        `follow-up send ${canSendImmediately ? "available now" : "wait until peer leaves busy/starting"}`,
+        `session ${peer.sessionId}`,
+      ].filter(Boolean).join("\n"),
     });
   }
 

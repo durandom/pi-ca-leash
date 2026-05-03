@@ -1,8 +1,15 @@
 {
   "name": "pi-ca-leash",
-  "private": true,
   "version": "0.10.0",
   "description": "Runtime-first Claude Code leash extension for pi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/durandom/pi-ca-leash.git"
+  },
+  "homepage": "https://github.com/durandom/pi-ca-leash#readme",
+  "bugs": {
+    "url": "https://github.com/durandom/pi-ca-leash/issues"
+  },
   "type": "module",
   "keywords": [
     "pi-package",
@@ -19,9 +26,22 @@
       "./extensions"
     ]
   },
+  "files": [
+    "extensions",
+    "README.md",
+    "ARCHITECTURE.md",
+    "CHANGELOG.md",
+    "DEVELOPMENT.md",
+    "KNOWN_LIMITS.md",
+    "AGENTS.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "npm run build --workspace @pi-claude-code-agent/runtime && npm run build --workspace @pi-claude-code-agent/intercom-bridge && npm run build --workspace @pi-claude-code-agent/subagents-backend && npm run build --workspace @pi-claude-code-agent/teams-backend",
-    "postinstall": "npm run build",
+    "prepare": "npm run build",
+    "prepack": "npm run build",
     "test": "npm run test --workspaces && npm run test:extension",
     "test:extension": "node --test --import tsx ./extensions/**/*.test.ts",
     "smoke": "npm run smoke --workspace @pi-claude-code-agent/runtime",
@@ -53,13 +73,24 @@
     }
   },
   "dependencies": {
-    "@types/node": "^24.9.1",
-    "typescript": "^5.9.3"
+    "@anthropic-ai/claude-agent-sdk": "^0.2.126",
+    "@pi-claude-code-agent/intercom-bridge": "0.10.0",
+    "@pi-claude-code-agent/runtime": "0.10.0",
+    "@pi-claude-code-agent/subagents-backend": "0.10.0",
+    "@pi-claude-code-agent/teams-backend": "0.10.0"
   },
+  "bundledDependencies": [
+    "@pi-claude-code-agent/runtime",
+    "@pi-claude-code-agent/intercom-bridge",
+    "@pi-claude-code-agent/subagents-backend",
+    "@pi-claude-code-agent/teams-backend"
+  ],
   "overrides": {
     "@anthropic-ai/sdk": "0.92.0"
   },
   "devDependencies": {
-    "tsx": "^4.20.6"
+    "@types/node": "^24.9.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
   }
 }

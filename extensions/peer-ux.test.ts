@@ -73,6 +73,52 @@ test("buildPeerActivityRow detects waiting for input", () => {
   assert.equal(row.activity, "needs input");
 });
 
+test("buildPeerActivityRow does not flag completed reports as waiting", () => {
+  const row = buildPeerActivityRow(makePeer(), [
+    makeEvent({
+      type: "message",
+      role: "assistant",
+      message: {
+        role: "assistant",
+        blocks: [{
+          type: "text",
+          text: [
+            "Slice implemented.",
+            "",
+            "Changed files:",
+            "- extensions/peer-ux.ts",
+            "",
+            "Commands:",
+            "- npm test",
+            "",
+            "Blockers: none.",
+            "Residual risk: low.",
+          ].join("\n"),
+        }],
+      },
+    }),
+  ]);
+
+  assert.equal(row.state, "idle");
+  assert.match(row.activity, /^last reply:/);
+});
+
+test("buildPeerActivityRow does not treat report headings as unresolved asks", () => {
+  const row = buildPeerActivityRow(makePeer(), [
+    makeEvent({
+      type: "message",
+      role: "assistant",
+      message: {
+        role: "assistant",
+        blocks: [{ type: "text", text: "What changed:\n- tightened peer state mapping\n\nNext steps: none." }],
+      },
+    }),
+  ]);
+
+  assert.equal(row.state, "idle");
+  assert.match(row.activity, /^last reply:/);
+});
+
 test("buildPeerActivityRow includes latest token usage from result events", () => {
   const row = buildPeerActivityRow(makePeer(), [
     makeEvent({

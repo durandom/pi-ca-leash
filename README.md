@@ -39,12 +39,24 @@ npm test
 npm run build
 ```
 
-`npm install` runs the workspace build through `postinstall`, so git-based pi installs have package `dist/` files available.
+`npm install` runs the workspace build through `prepare`, so local and git-based installs have package `dist/` files available.
 
-Install into pi from a pinned release:
+Install into pi from npm:
 
 ```bash
-pi install git:github.com/durandom/pi-ca-leash@v0.2.0
+pi install npm:pi-ca-leash
+```
+
+Pin an explicit npm version when needed:
+
+```bash
+pi install npm:pi-ca-leash@0.10.0
+```
+
+Install into pi from a pinned git release:
+
+```bash
+pi install git:github.com/durandom/pi-ca-leash@v0.10.0
 ```
 
 Install into pi from this checkout:
@@ -64,6 +76,14 @@ PI_CLAUDE_RUNTIME_DRIVER=codex-cli pi
 Existing persisted peers keep their recorded driver.
 
 ## Use
+
+Mental model:
+- the main agent stays in charge; peers are delegated workers, not replacements for the orchestrator
+- peers are long-lived sessions, so follow-up messages continue the same worker instead of starting from scratch
+- most peers work in the same repository checkout; prefer short prompts plus file-based handoffs over pasting large context
+- start bounded peer jobs, keep working in the main turn, and wait for the automatic completion/block/failure relay
+- use `ask` when you need a reply now, `send` for fire-and-forget follow-up work, and `history` only when you need to scroll back for evidence
+- do not babysit peers with repeated status polling
 
 Primary slash-command surface:
 
@@ -95,6 +115,7 @@ Quick check inside pi:
 /peer init
 /peer models codex-cli
 /peer start reviewer | Review this repo briefly and report one concrete risk.
+# keep working or wait; completion relays automatically
 /peer ask reviewer | Reply with exactly: peer-ok
 /peer list
 /peer dashboard advanced
@@ -141,9 +162,9 @@ PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1 PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1 pi
 
 ## Behavior
 
-The extension is lazy. Loading it registers commands and tools, but it does not start the Peers widget, background monitor, or intercom transport checks immediately. `/peer init` activates the peer workflow, adds the one-time orchestration guide to the main agent context, and shows the user a compact command cheat sheet as a user-only UI notification. The first actionable `/peer` command, such as `/peer models`, `/peer dashboard`, `/peer list`, or `/peer start`, also activates it and adds that agent guide once. `/peer help` and `/peer about` stay passive and show user-only UI notifications. `/peer about` reports the installed package version, package root, state root, default driver, and session mode.
+The extension is lazy. Loading it registers commands and tools, but it does not start the Peers widget, background monitor, or intercom transport checks immediately. `/peer` with no args opens the dashboard and activates peer mode. `/peer init` also activates the peer workflow, adds the one-time orchestration guide to the main agent context, and shows the user a compact command cheat sheet as a user-only UI notification. The first actionable `/peer` command, such as `/peer models`, `/peer dashboard`, `/peer list`, or `/peer start`, also activates it and adds that agent guide once. `/peer help` and `/peer about` stay passive and show user-only UI notifications. `/peer about` reports the installed package version, package root, state root, default driver, and session mode.
 
-Peers are asynchronous workers. The main agent should start a peer, continue useful work, and wait for the automatic peer completion, blocked, or failure relay. It should not poll `peer_list`, `peer_history`, or repeated `peer_ask` just to see whether the peer is done.
+Peers are asynchronous workers. The main agent should start a peer, continue useful work, and wait for the automatic peer completion, blocked, or failure relay. It should not poll `peer_list`, `peer_history`, or repeated `peer_ask` just to see whether the peer is done. When a peer returns, the main agent still owns verification, synthesis, and the final answer.
 
 The extension keeps peer output quiet by default:
 - peer work does not stream child transcript spam into the main window

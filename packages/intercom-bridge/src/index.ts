@@ -29,5 +29,6 @@ export type {
   DeliveryState,
   IntercomInboundMessage,
   IntercomMessageKind,
+  InterruptPeerResult,
   LaunchPeerInput,
 } from "./types.js";

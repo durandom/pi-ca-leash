@@ -4,7 +4,13 @@ All notable changes to this repository should be recorded here.
 
 ## 0.10.0 - 2026-05-03
 
+### Changed
+- Root package is now publishable as a single npm package that bundles the internal runtime, bridge, subagents, and teams workspaces while keeping their build output inside the shipped tarball.
+- Root install/build hooks now use `prepare` plus `prepack` instead of consumer-side `postinstall` rebuilds.
+
 ### Fixed
+- `peer_interrupt` now reports whether an interrupt signal was delivered, the runtime reason, resulting peer state, and whether follow-up input can be sent immediately.
+- Peer list/dashboard waiting state now only flags explicit unresolved asks, avoiding false `waiting / needs input` rows for normal completion reports.
 - Newly started peers now relay their first real `waiting`, `idle`, or `error` transition into the main context instead of suppressing the initial `needs input` signal.
 
 ## 0.9.0 - 2026-05-03
