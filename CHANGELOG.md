@@ -2,11 +2,15 @@
 
 All notable changes to this repository should be recorded here.
 
-## 0.7.0 - 2026-05-03
+## 0.8.0 - 2026-05-03
 
 ### Changed
 - Peer slash-command guidance, reports, dashboards, model lists, and history pages now use user-only UI notifications instead of custom chat messages, keeping them out of the main agent context.
 - Agent-facing peer messages remain explicit: the one-time orchestration guide is added to the main agent context, and peer completion/block/failure relays still arrive as wrapped follow-up turns with the latest visible peer message.
+
+## 0.7.0 - 2026-05-03
+
+### Changed
 - `/peer init` now carries the one-time main-agent orchestration guide plus a compact user-facing command cheat sheet, while repeated peer tool prompts stay narrowly tool-specific.
 - Runtime model selection now resolves common shorthand aliases such as `sonnet`, `opus`, `haiku`, `mini`, and `spark` to concrete catalog model ids before launching peers, subagents, or teammates.
 - `/peer models` and `runtime_models` now show a shorter recommended model list by default, with advisory use cases and clearer `context window` / `max output` column labels; pass `all`, `advanced`, `verbose`, or `verbose: true` for the full catalog.
