@@ -1,6 +1,6 @@
 {
   "name": "pi-ca-leash",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "description": "Harness-aware Claude Code and Codex CLI extension for pi",
   "license": "MIT",
   "repository": {
@@ -88,10 +88,10 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.126",
-    "@pi-claude-code-agent/intercom-bridge": "0.10.1",
-    "@pi-claude-code-agent/runtime": "0.10.1",
-    "@pi-claude-code-agent/subagents-backend": "0.10.1",
-    "@pi-claude-code-agent/teams-backend": "0.10.1"
+    "@pi-claude-code-agent/intercom-bridge": "0.10.2",
+    "@pi-claude-code-agent/runtime": "0.10.2",
+    "@pi-claude-code-agent/subagents-backend": "0.10.2",
+    "@pi-claude-code-agent/teams-backend": "0.10.2"
   },
   "bundledDependencies": [
     "@pi-claude-code-agent/runtime",

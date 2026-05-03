@@ -79,13 +79,13 @@ pi install npm:pi-ca-leash
 Pin an explicit version when needed:
 
 ```bash
-pi install npm:pi-ca-leash@0.10.1
+pi install npm:pi-ca-leash@0.10.2
 ```
 
 Install from a pinned git release:
 
 ```bash
-pi install git:github.com/durandom/pi-ca-leash@v0.10.1
+pi install git:github.com/durandom/pi-ca-leash@v0.10.2
 ```
 
 Try this checkout locally:
@@ -255,7 +255,7 @@ npm run smoke:last
 npm run smoke:manual
 ```
 
-For the full developer workflow, smoke-command reference, artifact/debugging guide, and manual release checklist, see [`DEVELOPMENT.md`](./DEVELOPMENT.md).
+For the full developer workflow, smoke-command reference, artifact/debugging guide, and manual release checklist, see [`DEVELOPMENT.md`](https://github.com/durandom/pi-ca-leash/blob/main/DEVELOPMENT.md).
 
 ## Persistence
 

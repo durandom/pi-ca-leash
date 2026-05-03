@@ -2,6 +2,11 @@
 
 All notable changes to this repository should be recorded here.
 
+## 0.10.2 - 2026-05-03
+
+### Fixed
+- README now links to the GitHub `DEVELOPMENT.md` instead of a file that is intentionally excluded from the published npm tarball, so package-gallery readers do not hit a broken docs link.
+
 ## 0.10.1 - 2026-05-03
 
 ### Changed
