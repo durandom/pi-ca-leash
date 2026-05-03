@@ -6,7 +6,7 @@ Agent guidance for working in `pi-ca-leash`.
 
 Keep this repo honest.
 
-This project is a **runtime-first local MVP** for Claude Code integration with pi. Do not rewrite it into a fake stateless provider integration and do not pretend upstream product integrations exist when they do not.
+This project is a **runtime-first package** for Claude Code and Codex CLI integration with pi. Do not rewrite it into a fake stateless provider integration and do not pretend upstream product integrations exist when they do not.
 
 ## Current scope
 

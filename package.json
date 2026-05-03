@@ -1,6 +1,6 @@
 {
   "name": "pi-ca-leash",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Harness-aware Claude Code and Codex CLI extension for pi",
   "license": "MIT",
   "repository": {
@@ -72,7 +72,7 @@
     "demo:intercom": "npm run demo --workspace @pi-claude-code-agent/intercom-bridge",
     "demo:subagent": "npm run demo --workspace @pi-claude-code-agent/subagents-backend",
     "demo:teams": "npm run demo --workspace @pi-claude-code-agent/teams-backend",
-    "plan:check": "echo 'Runtime + intercom bridge + subagents backend + teams backend implemented as local MVP packages'"
+    "plan:check": "echo 'Runtime + intercom bridge + subagents backend + teams backend implemented as runtime-first packages'"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
@@ -88,10 +88,10 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.126",
-    "@pi-claude-code-agent/intercom-bridge": "0.10.0",
-    "@pi-claude-code-agent/runtime": "0.10.0",
-    "@pi-claude-code-agent/subagents-backend": "0.10.0",
-    "@pi-claude-code-agent/teams-backend": "0.10.0"
+    "@pi-claude-code-agent/intercom-bridge": "0.10.1",
+    "@pi-claude-code-agent/runtime": "0.10.1",
+    "@pi-claude-code-agent/subagents-backend": "0.10.1",
+    "@pi-claude-code-agent/teams-backend": "0.10.1"
   },
   "bundledDependencies": [
     "@pi-claude-code-agent/runtime",

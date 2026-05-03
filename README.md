@@ -79,13 +79,13 @@ pi install npm:pi-ca-leash
 Pin an explicit version when needed:
 
 ```bash
-pi install npm:pi-ca-leash@0.10.0
+pi install npm:pi-ca-leash@0.10.1
 ```
 
 Install from a pinned git release:
 
 ```bash
-pi install git:github.com/durandom/pi-ca-leash@v0.10.0
+pi install git:github.com/durandom/pi-ca-leash@v0.10.1
 ```
 
 Try this checkout locally:

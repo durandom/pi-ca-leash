@@ -75,6 +75,6 @@ This file is intentionally blunt.
 
 ## Documentation limits
 
-14. **This repo is documented as a local MVP, not a final product.**
+14. **This repo should be documented as it actually works today, not as a future product fantasy.**
     - If the implementation grows, docs must stay equally honest.
     - Remove stale claims rather than letting optimistic historical docs linger.

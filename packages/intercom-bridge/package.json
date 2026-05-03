@@ -1,6 +1,6 @@
 {
   "name": "@pi-claude-code-agent/intercom-bridge",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "type": "module",
   "description": "Thin intercom-style bridge for Claude Code runtime sessions",
   "files": [
@@ -24,7 +24,7 @@
     "demo": "tsx src/cli.ts"
   },
   "peerDependencies": {
-    "@pi-claude-code-agent/runtime": "0.10.0"
+    "@pi-claude-code-agent/runtime": "0.10.1"
   },
   "devDependencies": {
     "tsx": "^4.20.6"

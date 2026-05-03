@@ -2,6 +2,14 @@
 
 All notable changes to this repository should be recorded here.
 
+## 0.10.1 - 2026-05-03
+
+### Changed
+- Public package/docs wording now leads with Claude Code and Codex CLI as harnesses, not just model endpoints, with pi positioned as the orchestrating brain over retained workers.
+- README now uses a more ecosystem-style flow: install, a fictional multi-peer session, natural-language orchestration framing, and clearer user-vs-development install guidance.
+- Removed stale "local MVP" phrasing from public/project docs while keeping runtime and integration limits explicit.
+- Trimmed the published npm tarball to the minimum extension/runtime payload while keeping gallery assets in GitHub and package metadata pointing at the raw preview image.
+
 ## 0.10.0 - 2026-05-03
 
 ### Changed
@@ -55,7 +63,7 @@ All notable changes to this repository should be recorded here.
 - Added a bundled Lanista-derived runtime model catalog for `claude-sdk` and `codex-cli`, exposed through `runtime_models` and `/peer models`.
 - `/peer start` can now include explicit driver and model fields in pipe syntax.
 - Runtime tool guidance now points agents to `runtime_models` before choosing non-default model ids.
-- Polished README setup, persistence, and runtime-driver wording around the current local MVP.
+- Polished README setup, persistence, and runtime-driver wording around the current runtime-first package.
 - Polished the compact Peers widget with peer counts, column labels, priority ordering, clearer context usage, and explicit local-mode broker warning text.
 - Aligned workspace package versions with the root `0.3.0` package version.
 - Reworked README into the single practical entrypoint, with the useful manual smoke and peer no-polling guidance folded in.
@@ -116,7 +124,7 @@ All notable changes to this repository should be recorded here.
 - `peer_history` paging now counts visible history entries instead of raw transcript events, which makes scrolling behave more like a human reading backscroll.
 - Runtime now preserves an explicitly requested model switch across resumed-session init events that report a stale prior model.
 - Primary peer operations are now also exposed as LLM-callable tools: `peer_start`, `peer_list`, `peer_history`, `peer_ask`, and `peer_stop`.
-- README, architecture notes, and known limits were updated to match peer-first MVP behavior.
+- README, architecture notes, and known limits were updated to match current peer-first behavior.
 
 ### Notes
 - Codex support is still partial: extension startup can choose a default peer driver, per-peer driver override exists on the LLM-callable `peer_start` tool, slash-command peer UX still has no per-peer driver selection, subagent/team driver threading is available through backend APIs and LLM-callable tools but not through slash-command/visual UX, and these surfaces are not being described as Codex-parity products.

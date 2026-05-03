@@ -1,6 +1,6 @@
 # Development
 
-This repository is a local runtime-first MVP. Keep development workflows honest:
+This repository is runtime-first. Keep development workflows honest:
 
 - automated smoke covers the runtime-backed tool surface only
 - manual smoke covers slash commands, dashboard, widget, and operator UX
