@@ -2,6 +2,7 @@
   "name": "pi-ca-leash",
   "version": "0.10.0",
   "description": "Runtime-first Claude Code leash extension for pi",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/durandom/pi-ca-leash.git"
