@@ -2,6 +2,8 @@ node_modules/
 dist/
 coverage/
 .env
+.envrc
+.npmrc.publish
 .DS_Store
 .pi/
 .pi-claude-code-agent/

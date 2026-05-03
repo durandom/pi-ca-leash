@@ -167,6 +167,33 @@ npm run smoke:clean
 
 The whole `.pi-ca-leash/` tree is already git-ignored.
 
+## npm publish setup
+
+Recommended local setup for npm publishing:
+
+1. revoke any accidentally exposed npm token
+2. create a new publish-capable npm token
+3. put the token in an ignored `.envrc`
+4. copy `.npmrc.publish.example` to `.npmrc.publish`
+5. let `direnv` load `NPM_TOKEN`
+
+Example `.envrc`:
+
+```bash
+export NPM_TOKEN=your-new-token-here
+```
+
+Example publish flow:
+
+```bash
+cp .npmrc.publish.example .npmrc.publish
+npm test
+npm run build
+NPM_CONFIG_USERCONFIG=.npmrc.publish npm publish
+```
+
+Do not commit `.envrc` or `.npmrc.publish`.
+
 ## Manual smoke checklist
 
 Use this before claiming the repo is ready to share:

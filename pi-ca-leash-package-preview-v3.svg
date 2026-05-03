@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1536 1024" width="1536" height="1024">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0%" stop-color="#050d1d"/>
+    <stop offset="100%" stop-color="#0e2a4d"/>
+  </linearGradient>
+  <radialGradient id="halo" cx="50%" cy="35%" r="70%">
+    <stop offset="0%" stop-color="#4ae2ff" stop-opacity="0.25"/>
+    <stop offset="100%" stop-color="#4ae2ff" stop-opacity="0"/>
+  </radialGradient>
+  <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+    <feGaussianBlur stdDeviation="18" result="blur"/>
+    <feMerge>
+      <feMergeNode in="blur"/>
+      <feMergeNode in="SourceGraphic"/>
+    </feMerge>
+  </filter>
+</defs>
+<rect width="1536" height="1024" fill="url(#bg)"/>
+<g opacity="0.16" stroke="#3a5b8a" stroke-width="1">
+  <g id="gridY">
+    <path d="M80 130 L80 980"/><path d="M160 130 L160 980"/><path d="M240 130 L240 980"/>
+    <path d="M320 130 L320 980"/><path d="M400 130 L400 980"/><path d="M480 130 L480 980"/>
+    <path d="M560 130 L560 980"/><path d="M640 130 L640 980"/><path d="M720 130 L720 980"/>
+    <path d="M800 130 L800 980"/><path d="M880 130 L880 980"/><path d="M960 130 L960 980"/>
+    <path d="M1040 130 L1040 980"/><path d="M1120 130 L1120 980"/><path d="M1200 130 L1200 980"/>
+    <path d="M1280 130 L1280 980"/><path d="M1360 130 L1360 980"/><path d="M1440 130 L1440 980"/>
+  </g>
+  <g id="gridX">
+    <path d="M40 160 L1500 160"/><path d="M40 220 L1500 220"/><path d="M40 280 L1500 280"/>
+    <path d="M40 340 L1500 340"/><path d="M40 400 L1500 400"/><path d="M40 460 L1500 460"/>
+    <path d="M40 520 L1500 520"/><path d="M40 580 L1500 580"/><path d="M40 640 L1500 640"/>
+    <path d="M40 700 L1500 700"/><path d="M40 760 L1500 760"/><path d="M40 820 L1500 820"/>
+  </g>
+</g>
+<rect x="0" y="0" width="1536" height="1024" fill="url(#halo)"/>
+<g transform="translate(0,0)" fill="none" stroke-linecap="round">
+  <g transform="translate(400,620)" stroke="#56c9ff" stroke-width="4" opacity="0.45">
+    <circle cx="0" cy="-190" r="46" fill="#0b2038"/>
+    <rect x="-33" y="-148" width="66" height="88" rx="18" fill="#122a48"/>
+    <line x1="-33" y1="-110" x2="33" y2="-110"/>
+    <line x1="-15" y1="-80" x2="15" y2="-80"/>
+    <line x1="-14" y1="-44" x2="-14" y2="14"/>
+    <line x1="0" y1="-44" x2="0" y2="14"/>
+    <line x1="14" y1="-44" x2="14" y2="14"/>
+    <line x1="-38" y1="0" x2="38" y2="0"/>
+  </g>
+  <g transform="translate(1136,620)" stroke="#7de7c3" stroke-width="4" opacity="0.45">
+    <circle cx="0" cy="-190" r="46" fill="#0b2038"/>
+    <rect x="-33" y="-148" width="66" height="88" rx="18" fill="#122a48"/>
+    <line x1="-33" y1="-110" x2="33" y2="-110"/>
+    <line x1="-15" y1="-80" x2="15" y2="-80"/>
+    <line x1="-14" y1="-44" x2="-14" y2="14"/>
+    <line x1="14" y1="-44" x2="14" y2="14"/>
+    <line x1="-38" y1="0" x2="38" y2="0"/>
+  </g>
+</g>
+<g fill="none" stroke="#a7f1ff" stroke-width="7" opacity="0.7" filter="url(#glow)">
+  <text x="768" y="520" text-anchor="middle" font-family="'Trebuchet MS', Arial, sans-serif" font-size="260" font-weight="700">π</text>
+</g>
+<g fill="none" stroke="#c3edff" stroke-width="5" opacity="0.95">
+  <text x="768" y="520" text-anchor="middle" font-family="'Trebuchet MS', Arial, sans-serif" font-size="260" font-weight="700" fill="#8ff0ff">π</text>
+</g>
+<g font-family="Menlo, 'Courier New', monospace" fill="#76e8ff" fill-opacity="0.85" font-size="24" opacity="0.9">
+  <text x="350" y="860">{ "tool": "agent-a", "state": "ready" }</text>
+  <text x="980" y="860">{ "tool": "agent-b", "state": "ready" }</text>
+</g>
+<g fill="#87ffcb" opacity="0.6" font-family="Menlo, monospace" font-size="24">
+  <text x="350" y="240">if task.ready(): run()</text>
+  <text x="980" y="240">while alive: inspect()</text>
+</g>
+<g fill="none" stroke="#6de2ff" stroke-width="3" opacity="0.45">
+  <path d="M530 240 C560 180, 640 180, 670 240"/>
+  <path d="M866 240 C896 180, 976 180, 1006 240"/>
+</g>
+</svg>

@@ -26,16 +26,28 @@
   "pi": {
     "extensions": [
       "./extensions"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/durandom/pi-ca-leash/main/pi-ca-leash-artifact-icon.png"
   },
   "files": [
-    "extensions",
+    "extensions/backend-tool-actions.ts",
+    "extensions/command-drivers.ts",
+    "extensions/command-visibility.ts",
+    "extensions/index.ts",
+    "extensions/model-catalog.ts",
+    "extensions/peer-history.ts",
+    "extensions/peer-naming.ts",
+    "extensions/peer-relay.ts",
+    "extensions/peer-ux.ts",
+    "extensions/persistence.ts",
+    "extensions/prompts.ts",
+    "extensions/runtime-driver.ts",
+    "extensions/runtime-safety.ts",
+    "extensions/support.ts",
+    "extensions/tool-inputs.ts",
+    "extensions/prompts",
     "README.md",
-    "ARCHITECTURE.md",
-    "CHANGELOG.md",
-    "DEVELOPMENT.md",
-    "KNOWN_LIMITS.md",
-    "AGENTS.md"
+    "LICENSE"
   ],
   "publishConfig": {
     "access": "public"
