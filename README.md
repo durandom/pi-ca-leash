@@ -173,36 +173,22 @@ Useful docs that should remain current:
 - `ARCHITECTURE.md`
 - `KNOWN_LIMITS.md`
 - `CHANGELOG.md`
+- `DEVELOPMENT.md`
 - `AGENTS.md`
 
 ## Development
 
-Common commands:
+Start here:
 
 ```bash
 npm test
 npm run build
-npm run smoke -- "Reply with exactly: smoke-ok"
-npm run demo:intercom -- "You are demo worker. Reply briefly."
-npm run demo:subagent -- "Reply with exactly: subagent-ok"
-npm run demo:teams -- "You are persistent teammate. Reply briefly."
+npm run smoke:dev
+npm run smoke:last
+npm run smoke:manual
 ```
 
-Experimental Codex checks:
-
-```bash
-PI_CLAUDE_RUNTIME_DRIVER=codex-cli npm run smoke -- "Reply with exactly: codex-smoke-ok"
-PI_CLAUDE_RUNTIME_DRIVER=codex-cli npm run demo:subagent -- "Reply with exactly: codex-subagent-ok"
-PI_CLAUDE_RUNTIME_DRIVER=codex-cli npm run demo:teams -- "Reply with exactly: codex-team-ok"
-```
-
-Manual pi smoke checklist:
-- clean or move `.pi-ca-leash/`
-- run `npm install`, `npm test`, and `npm run build`
-- install the checkout into pi
-- run `/peer`, `/peer start`, `/peer ask`, `/peer list`, and `/peer stop`
-- run `/peer dashboard advanced` and confirm retained backend diagnostics are believable
-- restart pi and confirm persisted peers/backends restore honestly
+For the full developer workflow, smoke-command reference, artifact/debugging guide, and manual release checklist, see [`DEVELOPMENT.md`](./DEVELOPMENT.md).
 
 ## Persistence
 

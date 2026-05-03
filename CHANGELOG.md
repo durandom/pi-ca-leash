@@ -2,9 +2,14 @@
 
 All notable changes to this repository should be recorded here.
 
-## Unreleased
+## 0.3.0 - 2026-05-03
 
 ### Changed
+- Added `DEVELOPMENT.md` and linked it from `README.md` as the dedicated developer workflow and smoke-debugging guide.
+- Added developer-oriented smoke helpers: `npm run smoke:dev`, `smoke:dev:codex`, `smoke:manual`, `smoke:manual:codex`, `smoke:last`, and `smoke:clean`.
+- Added `npm run smoke:pi:auto` and `npm run smoke:pi:auto:codex` helpers that start pi against this checkout in JSON mode with an isolated runtime-only prompt, then write Markdown and raw event/stderr smoke artifacts under `.pi-ca-leash/smoke/auto/`.
+- Added `npm run smoke:pi` and `npm run smoke:pi:codex` helpers that start pi against this checkout with `--no-extensions -e <repo-root>` for isolated pre-release hands-on smoke testing.
+- Automated pi smoke runs now stop the `pi --no-session` child after an explicit `SMOKE_OK`/`SMOKE_FAIL` final marker instead of waiting for the idle CLI process to exit by itself.
 - Extension startup is now lazy: loading registers commands/tools only, while `/peer init` or the first actionable `/peer` command starts the widget/background workflow and shows the operator guide.
 - Moved core extension prompt/guidance text into editable files under `extensions/prompts/`.
 - Added a bundled Lanista-derived runtime model catalog for `claude-sdk` and `codex-cli`, exposed through `runtime_models` and `/peer models`.
@@ -13,6 +18,10 @@ All notable changes to this repository should be recorded here.
 - Polished README setup, persistence, and runtime-driver wording around the current local MVP.
 - Aligned workspace package versions with the root `0.2.0` package version.
 - Reworked README into the single practical entrypoint, with the useful manual smoke and peer no-polling guidance folded in.
+
+### Fixed
+- `subagent_status` now accepts the same short run id prefixes shown by `subagent_run` and `subagent_list`, while still rejecting unknown or ambiguous prefixes.
+- `--no-session` smoke runs no longer start dashboard/background peer polling or emit stale peer follow-up turns after cleanup.
 
 ### Removed
 - Removed the redundant direct runtime dependency on `@anthropic-ai/sdk`; the runtime imports `@anthropic-ai/claude-agent-sdk`, and the root override remains as a guard for SDK resolution through that dependency tree.

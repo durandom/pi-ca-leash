@@ -76,7 +76,7 @@ interface FakeCommand {
   handler: (args: string, ctx: unknown) => Promise<void>;
 }
 
-async function loadCommandHarness(options: { defaultDriver: "claude-sdk" | "codex-cli"; advanced?: boolean; legacy?: boolean; codexDelayMs?: number }) {
+async function loadCommandHarness(options: { defaultDriver: "claude-sdk" | "codex-cli"; advanced?: boolean; legacy?: boolean; codexDelayMs?: number; noSession?: boolean }) {
   await ensurePiTuiStub();
   const codexExecutable = await createCodexStub(options.codexDelayMs ?? 0);
   const tempCwd = await mkdtemp(join(tmpdir(), "pi-ca-leash-extension-commands-"));
@@ -85,11 +85,15 @@ async function loadCommandHarness(options: { defaultDriver: "claude-sdk" | "code
   const previousCodexExecutable = process.env.CODEX_CLI_EXECUTABLE;
   const previousAdvanced = process.env[ADVANCED_COMMANDS_ENV];
   const previousLegacy = process.env[LEGACY_COMMANDS_ENV];
+  const previousArgv = [...process.argv];
 
   process.env.PI_CLAUDE_RUNTIME_DRIVER = options.defaultDriver;
   process.env.CODEX_CLI_EXECUTABLE = codexExecutable;
   process.env[ADVANCED_COMMANDS_ENV] = options.advanced ? "1" : "0";
   process.env[LEGACY_COMMANDS_ENV] = options.legacy ? "1" : "0";
+  if (options.noSession && !process.argv.includes("--no-session")) {
+    process.argv.push("--no-session");
+  }
   process.chdir(tempCwd);
 
   const commands = new Map<string, FakeCommand>();
@@ -150,6 +154,7 @@ async function loadCommandHarness(options: { defaultDriver: "claude-sdk" | "code
       else process.env[ADVANCED_COMMANDS_ENV] = previousAdvanced;
       if (previousLegacy == null) delete process.env[LEGACY_COMMANDS_ENV];
       else process.env[LEGACY_COMMANDS_ENV] = previousLegacy;
+      process.argv.splice(0, process.argv.length, ...previousArgv);
     },
   };
 }
@@ -198,6 +203,18 @@ test("first actionable /peer command activates and shows guide once", async () =
 
     const nextMessages = await harness.run("peer", "list");
     assert.doesNotMatch(nextMessages.map((entry) => String(entry.message.content ?? "")).join("\n"), /How to work with pi-ca-leash:/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("/peer commands stay renderless in --no-session smoke mode", async () => {
+  const harness = await loadCommandHarness({ defaultDriver: "codex-cli", noSession: true });
+  try {
+    const messages = await harness.run("peer", "models codex-cli");
+    assert.match(latestBody(messages), /codex-cli models/);
+    assert.equal(harness.widgets.has("peer-dashboard"), false);
+    assert.equal(harness.statusUpdates.length, 0);
   } finally {
     await harness.close();
   }

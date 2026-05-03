@@ -307,9 +307,10 @@ test("subagent tools honor codex extension default when driver omitted", async (
     assert.equal(listed.details.runs.length, 1);
     assert.equal(listed.details.runs[0].driver, "codex-cli");
 
-    const status = await harness.execute("subagent_status", { runId: started.details.runId });
+    const status = await harness.execute("subagent_status", { runId: started.details.runId.slice(0, 8) });
     assert.equal(status.details.driver, "codex-cli");
     assert.equal(status.details.state, "completed");
+    assert.equal(status.details.runId, started.details.runId);
   } finally {
     await harness.close();
   }

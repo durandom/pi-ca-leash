@@ -146,12 +146,14 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   let attentionLedger: AttentionLedger = await readAttentionLedger(attentionLedgerPath);
   let persistedAttentionLedger = serializeAttentionLedger(attentionLedger);
   const peerRelaySnapshots = new Map<string, PeerRelaySnapshot>();
+  const suppressNextPeerRelay = new Set<string>();
   let peerModeActive = false;
   let peerGuideShown = false;
   let runtimeDriverFallbackShown = false;
 
   const showAdvancedCommands = advancedCommandsEnabled();
   const showLegacyCommands = legacyCommandsEnabled();
+  const noSessionMode = process.argv.includes("--no-session");
   const startupSummary = `${EXTENSION_NAME} v${EXTENSION_VERSION} loaded · default driver ${runtimeDriverConfig.defaultDriver}`;
   const dashboardState: DashboardState = createDashboardState(startupSummary);
 
@@ -358,10 +360,15 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   async function syncPeerRelaySnapshot(peer: BridgePeer): Promise<{ row: PeerActivityRow; message?: string }> {
     const { snapshot, row, message } = await buildPeerRelayInput(peer);
     peerRelaySnapshots.set(peer.name, snapshot);
+    suppressNextPeerRelay.delete(peer.name);
     return { row, message };
   }
 
   async function relayPeerCompletionToMain(peer: BridgePeer, options: { force?: boolean; reply?: string } = {}): Promise<boolean> {
+    if (["stopped", "disconnected"].includes(peer.state)) {
+      suppressNextPeerRelay.delete(peer.name);
+      return false;
+    }
     const previous = peerRelaySnapshots.get(peer.name);
     const { snapshot, row, message } = await buildPeerRelayInput(peer);
     const shouldRelay = options.force
@@ -370,6 +377,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
 
     peerRelaySnapshots.set(peer.name, snapshot);
     if (!shouldRelay) {
+      return false;
+    }
+    if (!options.force && suppressNextPeerRelay.delete(peer.name)) {
       return false;
     }
 
@@ -422,10 +432,14 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
 
   async function activatePeerMode(ctx: ExtensionContext | ExtensionCommandContext, options: { command?: string; showGuide?: boolean; forceGuide?: boolean; reason?: string } = {}): Promise<void> {
     if (!peerModeActive) {
-      await ensureIntercomTransportHealthy(false);
+      if (!noSessionMode) {
+        await ensureIntercomTransportHealthy(false);
+      }
       await syncAttentionLedger();
       await seedPeerRelaySnapshots();
-      startBackgroundMonitor();
+      if (!noSessionMode) {
+        startBackgroundMonitor();
+      }
       peerModeActive = true;
       dashboardContextRef = ctx;
       if (options.reason) {
@@ -546,7 +560,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
 
       const existingNames = new Set((await bridge.listPeers()).map((peer) => peer.name));
       const name = explicitName || derivePeerName(prompt, existingNames);
-      await ensureIntercomTransportHealthy(false);
+      if (!noSessionMode) {
+        await ensureIntercomTransportHealthy(false);
+      }
       const peer = await startPeerWithoutWaiting({
         name,
         prompt,
@@ -557,6 +573,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
       peerNameCache.add(peer.name);
       const { row, message } = await syncPeerRelaySnapshot(peer);
+      suppressNextPeerRelay.add(peer.name);
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer started: ${peer.name}`);
       sendCommandMessage(pi, {
         level: "success",
@@ -746,6 +763,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         body: [modelNote, formatQuotedTextBlock(truncate(message, 4_000))].filter(Boolean).join("\n\n"),
       });
 
+      suppressNextPeerRelay.delete(name);
       const result = await bridge.ask(name, {
         from: "pi-main-agent",
         text: message,
@@ -812,6 +830,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         body: [modelNote, formatQuotedTextBlock(truncate(message, 4_000))].filter(Boolean).join("\n\n"),
       });
 
+      suppressNextPeerRelay.delete(name);
       const peer = await bridge.send(name, {
         from: "pi-main-agent",
         text: message,
@@ -919,6 +938,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           const stopped = await bridge.stop(peer.name);
           peerNameCache.delete(peer.name);
           peerRelaySnapshots.delete(peer.name);
+          suppressNextPeerRelay.delete(peer.name);
           stoppedPeers.push({
             peerName: stopped.name,
             state: stopped.state,
@@ -948,6 +968,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       const peer = await bridge.stop(name);
       peerNameCache.delete(name);
       peerRelaySnapshots.delete(name);
+      suppressNextPeerRelay.delete(name);
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer stopped: ${peer.name}`);
       return {
         content: [{
@@ -1093,7 +1114,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         throw new Error("runId required");
       }
 
-      const run = await subagents.statusRun(runId);
+      const resolvedRunId = resolveSubagentRunId(runId, await subagents.listRuns());
+      const run = await subagents.statusRun(resolvedRunId);
       if (!run) {
         throw new Error(`Unknown run ${runId}`);
       }
@@ -1153,8 +1175,11 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       const effectiveDriver = input.driver ?? runtimeDriverConfig.defaultDriver;
       const modelNote = describeModelSelection(effectiveDriver, input.model);
 
-      await ensureIntercomTransportHealthy(false);
+      if (!noSessionMode) {
+        await ensureIntercomTransportHealthy(false);
+      }
       const teammate = await teams.spawnTeammate(buildTeamSpawnRequest(input, cwd));
+      suppressNextPeerRelay.add(teammate.name);
       peerNameCache.add(teammate.name);
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Team + ${teammate.name}`);
       return {
@@ -1200,8 +1225,13 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         throw new Error("name, title, and details required");
       }
 
+      suppressNextPeerRelay.delete(name);
       const task = await teams.assignTask({ assignee: name, title, details });
       const teammate = await teams.teammateStatus(name);
+      const peer = await bridge.status(name);
+      if (peer) {
+        await syncPeerRelaySnapshot(peer);
+      }
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Task ${shortId(task.taskId)} ${task.state}`);
       return {
         content: [{
@@ -1242,7 +1272,12 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         throw new Error("name and message required");
       }
 
+      suppressNextPeerRelay.delete(name);
       const result = await teams.sendMessage(name, message);
+      const peer = await bridge.status(name);
+      if (peer) {
+        await syncPeerRelaySnapshot(peer);
+      }
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Team ← ${result.teammate.name}`);
       return {
         content: [{
@@ -1312,6 +1347,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         throw new Error("name required");
       }
 
+      suppressNextPeerRelay.delete(name);
       const teammate = await teams.stopTeammate(name);
       peerNameCache.delete(name);
       peerRelaySnapshots.delete(name);
@@ -1342,6 +1378,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     dashboardContextRef = undefined;
     lastWidgetSignature = undefined;
     peerRelaySnapshots.clear();
+    suppressNextPeerRelay.clear();
     peerModeActive = false;
     peerGuideShown = false;
     runtimeDriverFallbackShown = false;
@@ -1406,7 +1443,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       ].filter(Boolean).join("\n\n"),
     });
 
-    await ensureIntercomTransportHealthy(false);
+    if (!noSessionMode) {
+      await ensureIntercomTransportHealthy(false);
+    }
     const peer = await startPeerWithoutWaiting({
       name,
       prompt: parsed.prompt,
@@ -1415,6 +1454,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       cwd,
       permissionMode: "bypassPermissions",
     });
+    suppressNextPeerRelay.add(peer.name);
     peerNameCache.add(peer.name);
     await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer started: ${peer.name}`);
     sendCommandMessage(pi, {
@@ -1431,7 +1471,6 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         PEER_NO_BABYSITTING_GUIDANCE,
       ].filter((line) => line !== undefined).join("\n"),
     });
-    await relayPeerCompletionToMain(peer, { force: true });
   }
 
   async function handlePeerListCommand(ctx: ExtensionCommandContext, command: string): Promise<void> {
@@ -1482,6 +1521,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       body: formatQuotedTextBlock(truncate(message, 4_000)),
     });
 
+    suppressNextPeerRelay.delete(name);
     const result = await bridge.ask(name, {
       from: "pi-user",
       text: message,
@@ -1494,7 +1534,6 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       title: `Peer reply: ${name}`,
       body: [`driver ${result.peer.driver ?? "claude-sdk"}`, truncate(result.reply, 1200) || "<empty reply>"].join("\n\n"),
     });
-    await relayPeerCompletionToMain(result.peer, { force: true, reply: result.reply });
   }
 
   async function handlePeerSendCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
@@ -1515,6 +1554,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       body: formatQuotedTextBlock(truncate(message, 4_000)),
     });
 
+    suppressNextPeerRelay.delete(name);
     const peer = await bridge.send(name, {
       from: "pi-user",
       text: message,
@@ -1594,6 +1634,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
 
     const peer = await bridge.interrupt(name);
+    suppressNextPeerRelay.delete(name);
     peerNameCache.add(name);
     await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer interrupted: ${peer.name}`);
     sendCommandMessage(pi, {
@@ -1635,6 +1676,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         await bridge.stop(peer.name);
         peerNameCache.delete(peer.name);
         peerRelaySnapshots.delete(peer.name);
+        suppressNextPeerRelay.delete(peer.name);
         stopped.push(peer.name);
       }
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peers stopped: ${stopped.length}`);
@@ -1660,6 +1702,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     const peer = await bridge.stop(name);
     peerNameCache.delete(name);
     peerRelaySnapshots.delete(name);
+    suppressNextPeerRelay.delete(name);
     await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer stopped: ${peer.name}`);
     sendCommandMessage(pi, {
       level: "warning",
@@ -1841,7 +1884,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         return;
       }
 
-      const run = await subagents.statusRun(runId);
+      const resolvedRunId = resolveSubagentRunId(runId, await subagents.listRuns());
+      const run = await subagents.statusRun(resolvedRunId);
       if (!run) {
         sendCommandMessage(pi, {
           level: "error",
@@ -1937,7 +1981,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         return;
       }
 
-      await ensureIntercomTransportHealthy(false);
+      if (!noSessionMode) {
+        await ensureIntercomTransportHealthy(false);
+      }
       const teammate = await teams.spawnTeammate({
         name: parsed.name,
         prompt: parsed.prompt,
@@ -2122,15 +2168,17 @@ async function refreshDashboard(
 
   const data = preCollected ?? await collectDashboardData(runtime, bridge, subagents, teams, state, attentionLedger);
 
-  ctx.ui.setStatus(EXTENSION_NAME, undefined);
-  const newSignature = computeWidgetSignature({
-    peerRows: data.snapshot.peerRows.filter(isPeerVisibleInWidget),
-    transportDegraded: data.snapshot.transportDegraded,
-    lastEvent: data.snapshot.lastEvent,
-  });
-  if (newSignature !== lastWidgetSignature) {
-    lastWidgetSignature = newSignature;
-    ctx.ui.setWidget("peer-dashboard", createDashboardWidget(data.snapshot));
+  if (!process.argv.includes("--no-session")) {
+    ctx.ui.setStatus(EXTENSION_NAME, undefined);
+    const newSignature = computeWidgetSignature({
+      peerRows: data.snapshot.peerRows.filter(isPeerVisibleInWidget),
+      transportDegraded: data.snapshot.transportDegraded,
+      lastEvent: data.snapshot.lastEvent,
+    });
+    if (newSignature !== lastWidgetSignature) {
+      lastWidgetSignature = newSignature;
+      ctx.ui.setWidget("peer-dashboard", createDashboardWidget(data.snapshot));
+    }
   }
   return data;
 }
@@ -2577,6 +2625,17 @@ function runStateLevel(state: string): CommandMessageLevel {
 
 function isProblemState(state: string): boolean {
   return ["errored", "disconnected", "interrupted", "failed"].includes(state);
+}
+
+function resolveSubagentRunId(token: string, runs: Array<{ runId: string }>): string {
+  const matches = runs.filter((run) => run.runId.startsWith(token));
+  if (matches.length === 1) {
+    return matches[0]!.runId;
+  }
+  if (matches.length > 1) {
+    throw new Error(`Ambiguous run id prefix ${token}`);
+  }
+  throw new Error(`Unknown run ${token}`);
 }
 
 function resolveAttentionRun(token: string, attention: AttentionView[]): AttentionView {
