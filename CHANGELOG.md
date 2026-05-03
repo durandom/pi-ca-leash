@@ -4,7 +4,26 @@ All notable changes to this repository should be recorded here.
 
 ## Unreleased
 
-Nothing yet.
+### Changed
+- Polished README setup, persistence, and runtime-driver wording around the current local MVP.
+- Aligned workspace package versions with the root `0.2.0` package version.
+
+### Removed
+- Removed the redundant direct runtime dependency on `@anthropic-ai/sdk`; the runtime imports `@anthropic-ai/claude-agent-sdk`, and the root override remains as a guard for SDK resolution through that dependency tree.
+- Removed unused internal TypeScript declarations found by `noUnusedLocals` / `noUnusedParameters` checks.
+
+## 0.2.0 - 2026-05-03
+
+### Changed
+- Public slash-command UX now centers on `/peer` (`dashboard`, `start`, `ask`, `send`, `list`, `history`, `interrupt`, `stop`).
+- Old `/claude-*` slash commands are hidden by default and only restored with `PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1`; old internal diagnostics additionally require `PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1`.
+- Command result renderer, widget key/title, hints, and peer guidance now use `peer`/`pi-ca-leash` branding instead of `cca` or old extension labels.
+- README install instructions now pin the public release as `git:github.com/durandom/pi-ca-leash@v0.2.0`.
+- Pi host peer dependencies are marked optional so clean git installs do not download pi core packages unnecessarily.
+- Root package overrides now guard `@anthropic-ai/sdk` resolution through the current Claude agent SDK dependency tree.
+
+### Removed
+- Scratch/planning markdown files that should not ship in the public package.
 
 ## 0.1.1 - 2026-05-03
 

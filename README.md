@@ -72,7 +72,7 @@ Truth:
 - Extension peer UX can launch new peers on the configured default runtime driver.
 - Default driver can be selected at pi startup with `PI_CLAUDE_RUNTIME_DRIVER=claude-sdk|codex-cli`.
 - LLM-callable `peer_start` can override the driver per peer.
-- Slash-command peer UX still has no per-peer driver selection.
+- Public `/peer` examples stay driver-agnostic; Codex-backed peers remain experimental and can be selected globally with `PI_CLAUDE_RUNTIME_DRIVER` or per peer through the LLM-callable `peer_start` tool.
 
 ### `@pi-claude-code-agent/subagents-backend`
 Provides:
@@ -107,9 +107,9 @@ Truth:
 
 The pi extension in `extensions/index.ts` currently adds:
 - peer-first widget with one live row per peer, including last update time and last-known context-window percentage when available
-- peer-first `/claude-dashboard` plus explicit advanced mode via `/claude-dashboard advanced`
-- immediate visible acknowledgments for `/claude-peer-start` and `/claude-peer-ask`
-- LLM-callable peer tools: `peer_start`, `peer_list`, `peer_history`, `peer_ask`, `peer_stop`
+- peer-first `/peer` command dispatcher with `/peer dashboard` and `/peer dashboard advanced`
+- immediate visible acknowledgments for `/peer start` and `/peer ask`
+- LLM-callable peer tools: `peer_start`, `peer_list`, `peer_history`, `peer_ask`, `peer_send`, `peer_interrupt`, `peer_stop`
 - LLM-callable retained backend tools: `subagent_run`, `subagent_list`, `subagent_status`, `team_spawn`, `team_task`, `team_message`, `team_list`, `team_stop`
 - peer tool support for explicit start-time `driver`, `model`, and `cwd`, persistent model switching via `peer_ask`, and bulk peer stop through `peer_stop(all=true, confirmAll=true)`
 - scrollable peer transcript history for the main agent via `peer_history`
@@ -118,7 +118,7 @@ The pi extension in `extensions/index.ts` currently adds:
 - background dashboard refresh every 5s
 - broker disconnect/reconnect notices and late transport rebind when reachable again
 - attention notifications for noisy/stale background runs
-- internal subagent, attention, team, runtime, and dev slash commands kept in code but hidden from the default UX
+- legacy `/claude-*` slash commands hidden by default and only restored with `PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1`
 - persisted local attention state across pi restarts
 
 Attention state is stored at:
@@ -130,12 +130,12 @@ Attention state is stored at:
 ## Requirements
 
 You need:
-- Node.js
+- Node.js 18 or newer
 - npm
 - a working Claude Code environment for Claude-backed execution
 - a real pi installation to load the extension
 
-Optional for experimental Codex-backed peers:
+Optional for experimental Codex-backed runtime paths:
 - installed `codex` CLI available on `PATH`
 
 Peer dependencies expected from pi host environment:
@@ -150,12 +150,14 @@ npm test
 npm run build
 ```
 
+`npm install` runs the workspace build through `postinstall` so git-based pi installs have package `dist/` files available.
+
 ## Install into pi
 
 For a pinned release install:
 
 ```bash
-pi install git:github.com/durandom/pi-ca-leash@v0.1.1
+pi install git:github.com/durandom/pi-ca-leash@v0.2.0
 ```
 
 For local development from this repository root:
@@ -183,31 +185,31 @@ After installing into pi, start pi in this repo and try these.
 ### 1. Start a peer
 
 ```text
-/claude-peer-start Review auth flow and reply briefly.
+/peer start Review auth flow and reply briefly.
 ```
 
 You should immediately see a start acknowledgment in the main window, including the auto-generated peer name.
-Live activity should appear in the `Runtime Peers` widget.
+Live activity should appear in the `Peers` widget.
 When the peer finishes, the extension also injects the last peer message back into a new wrapped main-agent turn.
 
 Use an explicit override when needed:
 
 ```text
-/claude-peer-start reviewer | Review auth flow and reply briefly.
+/peer start reviewer | Review auth flow and reply briefly.
 ```
 
 ### 2. Ask the peer
 
 ```text
-/claude-peer-ask worker1 | Reply with exactly: peer-ok
-/claude-peer-list
+/peer ask worker1 | Reply with exactly: peer-ok
+/peer list
 ```
 
 ### 3. Inspect the dashboard
 
 ```text
-/claude-dashboard
-/claude-dashboard advanced
+/peer
+/peer dashboard advanced
 ```
 
 Default dashboard is peer-first.
@@ -218,14 +220,18 @@ Advanced mode keeps retained backend diagnostics explicit but out of the main UX
 Primary peer UX:
 
 ```text
-/claude-dashboard [advanced]
-/claude-peer-start <prompt>
-/claude-peer-start <name> | <prompt>
-/claude-peer-list
-/claude-peer-ask <name> | <message>
-/claude-peer-send <name> | <message>
-/claude-peer-interrupt <name>
-/claude-peer-stop <name>
+/peer
+/peer dashboard
+/peer dashboard advanced
+/peer start <prompt>
+/peer start <name> | <prompt>
+/peer ask <name> | <message>
+/peer send <name> | <message>
+/peer list
+/peer history <name> [cursor] [limit]
+/peer interrupt <name>
+/peer stop <name>
+/peer stop --all --confirm
 ```
 
 LLM-callable peer tools:
@@ -259,31 +265,33 @@ Notes:
 - `peer_history` lets the main agent scroll through prior peer transcript pages using `previousCursor` and `nextCursor`.
 - `peer_history` paging is based on visible history entries, not hidden/raw transcript events.
 
-Internal slash commands are hidden by default.
+Legacy `/claude-*` slash commands are hidden by default.
 
-For development-only access, start pi with:
+For compatibility-only access to the old peer commands, start pi with:
 
 ```bash
-PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1 pi
+PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1 pi
 ```
 
-That re-exposes:
+For development-only access to old internal diagnostics, both flags are required:
+
+```bash
+PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1 PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1 pi
+```
+
+That re-exposes legacy/internal commands such as:
 
 ```text
-/claude-dev-ping
+/claude-dashboard
+/claude-peer-start <prompt>
+/claude-peer-ask <name> | <message>
 /claude-subagent-run <task>
-/claude-subagent-list
-/claude-subagent-status <runId>
 /claude-attention-list
-/claude-attention-ack <runId-prefix>
-/claude-attention-snooze <runId-prefix> [minutes]
-/claude-team-spawn <name> | <prompt>
-/claude-team-task <name> | <title> | <details>
-/claude-team-message <name> | <message>
 /claude-team-list
-/claude-team-stop <name>
 /claude-runtime-list
 ```
+
+Prefer `/peer` for public UX.
 
 ## Useful workspace commands
 
@@ -322,6 +330,8 @@ Important subpaths:
   teams/
   extension/
 ```
+
+These paths are ignored by git. Remove `.pi-ca-leash/` when you need a clean local manual-test session.
 
 ## Testing status
 

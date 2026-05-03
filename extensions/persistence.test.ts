@@ -7,7 +7,7 @@ import { createAttentionLedger } from "./support.ts";
 import { readAttentionLedger, serializeAttentionLedger, writeAttentionLedger } from "./persistence.ts";
 
 test("attention ledger persistence round-trips ack and snooze state", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "cca-attention-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-ca-leash-attention-"));
   const file = join(dir, "attention-ledger.json");
   const ledger = {
     runs: {
@@ -26,7 +26,7 @@ test("attention ledger persistence round-trips ack and snooze state", async () =
 });
 
 test("missing or invalid attention ledger falls back to empty state", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "cca-attention-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-ca-leash-attention-"));
   const file = join(dir, "attention-ledger.json");
 
   assert.deepEqual(await readAttentionLedger(file), createAttentionLedger());
@@ -36,7 +36,7 @@ test("missing or invalid attention ledger falls back to empty state", async () =
 });
 
 test("attention ledger persistence sanitizes malformed entries", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "cca-attention-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-ca-leash-attention-"));
   const file = join(dir, "attention-ledger.json");
 
   await writeFile(file, JSON.stringify({

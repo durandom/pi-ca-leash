@@ -6,7 +6,7 @@ import { ClaudeCodeTeamsBackend } from "@pi-claude-code-agent/teams-backend";
 import type { ExtensionAPI, ExtensionContext, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { Box, Text, truncateToWidth, visibleWidth, type AutocompleteItem } from "@mariozechner/pi-tui";
 import { readAttentionLedger, serializeAttentionLedger, writeAttentionLedger } from "./persistence.js";
-import { ADVANCED_COMMANDS_ENV, advancedCommandsEnabled } from "./command-visibility.js";
+import { ADVANCED_COMMANDS_ENV, LEGACY_COMMANDS_ENV, advancedCommandsEnabled, legacyCommandsEnabled } from "./command-visibility.js";
 import { derivePeerName } from "./peer-naming.js";
 import {
   createPeerRelaySnapshot,
@@ -43,7 +43,7 @@ import {
 } from "./support.js";
 
 const EXTENSION_NAME = "pi-ca-leash";
-const EXTENSION_VERSION = "0.1.1";
+const EXTENSION_VERSION = "0.2.0";
 const STATE_DIR_NAME = ".pi-ca-leash";
 const BACKGROUND_POLL_INTERVAL_MS = 5_000;
 const BACKGROUND_REFRESH_MIN_INTERVAL_MS = 3_000;
@@ -141,6 +141,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   const peerRelaySnapshots = new Map<string, PeerRelaySnapshot>();
 
   const showAdvancedCommands = advancedCommandsEnabled();
+  const showLegacyCommands = legacyCommandsEnabled();
   const startupSummary = `${EXTENSION_NAME} v${EXTENSION_VERSION} loaded · default driver ${runtimeDriverConfig.defaultDriver}`;
   const dashboardState: DashboardState = createDashboardState(startupSummary);
 
@@ -409,14 +410,14 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   await seedPeerRelaySnapshots();
   startBackgroundMonitor();
 
-  pi.registerMessageRenderer("claude-command-result", (message, { expanded }, theme) => {
+  pi.registerMessageRenderer("peer-command-result", (message, { expanded }, theme) => {
     const details = (message.details ?? {}) as Partial<CommandMessageDetails>;
     const level = details.level ?? "info";
-    const title = details.title ?? "Claude command result";
+    const title = details.title ?? "Peer command result";
     const body = typeof message.content === "string" ? message.content.trim() : String(message.content ?? "").trim();
     const color = levelColor(level);
 
-    let text = `${theme.fg("accent", "[cca]")} ${theme.fg(color, title)}`;
+    let text = `${theme.fg("accent", "[peer]")} ${theme.fg(color, title)}`;
     if (body) {
       text += `\n${body}`;
     }
@@ -1298,20 +1299,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     persistedAttentionLedger = serializeAttentionLedger(attentionLedger);
   });
 
-  if (showAdvancedCommands) {
-    registerClaudeCommand(pi, "claude-dev-ping", `Advanced: proof that ${EXTENSION_NAME} reloaded successfully (set ${ADVANCED_COMMANDS_ENV}=1)`, async (_args, ctx) => {
-      const sessions = await runtime.list();
-      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Ping ok · s=${sessions.length}`);
-      sendCommandMessage(pi, {
-        level: "success",
-        command: "claude-dev-ping",
-        title: "Ping ok",
-        body: `sessions ${sessions.length}`,
-      });
-    });
-  }
-
-  registerClaudeCommand(pi, "claude-dashboard", "Show peer dashboard. Args: [advanced]", async (args, ctx) => {
+  async function handleDashboardCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
     const advanced = args.trim().toLowerCase() === "advanced";
     await syncAttentionLedger();
     const data = await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger);
@@ -1322,24 +1310,20 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       || data.snapshot.taskIssues > 0;
     sendCommandMessage(pi, {
       level: health === "warning" || (advanced && advancedDiagnosticsWarning) ? "warning" : "info",
-      command: "claude-dashboard",
+      command,
       title: advanced ? "Peer dashboard · advanced" : "Peer dashboard",
       body: advanced ? formatAdvancedDashboardReport(data) : formatPeerFirstDashboardReport(data),
     });
-  });
+  }
 
-  registerClaudeCommand(pi, "claude-peer-start", "Start peer. Args: <prompt>, <driver> | <prompt>, <name> | <prompt>, or <name> | <prompt> | <driver>", async (args, ctx) => {
+  async function handlePeerStartCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
     const parsed = parsePeerStartCommandInput(args);
     if (!parsed.prompt || hasPlaceholderToken(parsed.name, parsed.prompt)) {
-      showUsage(pi, "claude-peer-start", [
-        "/claude-peer-start <prompt>",
-        "/claude-peer-start <driver> | <prompt>",
-        "/claude-peer-start <name> | <prompt>",
-        "/claude-peer-start <name> | <prompt> | <driver>",
-        "Example: /claude-peer-start Review auth flow and reply briefly.",
-        "Example: /claude-peer-start codex-cli | Review auth flow and reply briefly.",
-        "Example: /claude-peer-start reviewer | You are a brief worker. Reply briefly.",
-        "Example: /claude-peer-start reviewer | You are a brief worker. Reply briefly. | codex-cli",
+      showUsage(pi, command, [
+        `/${command} <prompt>`,
+        `/${command} <name> | <prompt>`,
+        `Example: /${command} Review auth flow and reply briefly.`,
+        `Example: /${command} reviewer | You are a brief worker. Reply briefly.`,
       ].join("\n"));
       return;
     }
@@ -1349,10 +1333,10 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
 
     sendCommandMessage(pi, {
       level: "info",
-      command: "claude-peer-start",
+      command,
       title: `Starting peer: ${name}`,
       body: [
-        parsed.autoNamed ? `auto-named from prompt\n\n${truncate(parsed.prompt, 160)}` : "Watch Runtime Peers widget for live activity.",
+        parsed.autoNamed ? `auto-named from prompt\n\n${truncate(parsed.prompt, 160)}` : "Watch Peers widget for live activity.",
         parsed.driver ? `driver ${parsed.driver}` : undefined,
       ].filter(Boolean).join("\n\n"),
     });
@@ -1369,7 +1353,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer started: ${peer.name}`);
     sendCommandMessage(pi, {
       level: "success",
-      command: "claude-peer-start",
+      command,
       title: `Peer started: ${peer.name}`,
       body: [
         parsed.autoNamed ? `auto-name ${peer.name}` : undefined,
@@ -1381,194 +1365,311 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       ].filter((line) => line !== undefined).join("\n"),
     });
     await relayPeerCompletionToMain(peer, { force: true });
-  });
+  }
 
-  registerClaudeCommand(pi, "claude-peer-list", "List known peers", async (_args, ctx) => {
+  async function handlePeerListCommand(ctx: ExtensionCommandContext, command: string): Promise<void> {
     const data = await collectDashboardData(runtime, bridge, subagents, teams, dashboardState, attentionLedger);
     syncNameCache(peerNameCache, data.peers.map((peer) => peer.name));
     await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peers · ${data.peers.length}`, data);
     sendCommandMessage(pi, {
       level: data.snapshot.peerRows.some((row) => ["error", "offline", "waiting"].includes(row.state)) ? "warning" : "info",
-      command: "claude-peer-list",
+      command,
       title: `Peers (${data.peers.length})`,
       body: formatPeerList(data.snapshot.peerRows),
     });
-  });
+  }
 
-  registerClaudeCommand(
-    pi,
-    "claude-peer-ask",
-    "Ask named peer. Args: <name> | <message>",
-    async (args, ctx) => {
-      const [name, message] = splitArgs(args, 2);
-      if (!name || !message || hasPlaceholderToken(name, message)) {
-        showUsage(pi, "claude-peer-ask", [
-          "/claude-peer-ask <name> | <message>",
-          "Example: /claude-peer-ask worker1 | Reply with exactly: peer-ok",
-        ].join("\n"));
-        return;
-      }
-
-      sendCommandMessage(pi, {
-        level: "info",
-        command: "claude-peer-ask",
-        title: `Sent to peer: ${name}`,
-        body: formatQuotedTextBlock(truncate(message, 4_000)),
-      });
-
-      const result = await bridge.ask(name, {
-        from: "pi-user",
-        text: message,
-      });
-      peerNameCache.add(name);
-      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer replied: ${name}`);
-      sendCommandMessage(pi, {
-        level: result.runState === "failed" ? "error" : result.runState === "interrupted" ? "warning" : "success",
-        command: "claude-peer-ask",
-        title: `Peer reply: ${name}`,
-        body: [`driver ${result.peer.driver ?? "claude-sdk"}`, truncate(result.reply, 1200) || "<empty reply>"].join("\n\n"),
-      });
-      await relayPeerCompletionToMain(result.peer, { force: true, reply: result.reply });
-    },
-    (prefix) => completePeerName(prefix, peerNameCache, true),
-  );
-
-  registerClaudeCommand(
-    pi,
-    "claude-peer-send",
-    "Send named peer without waiting. Args: <name> | <message>",
-    async (args, ctx) => {
-      const [name, message] = splitArgs(args, 2);
-      if (!name || !message || hasPlaceholderToken(name, message)) {
-        showUsage(pi, "claude-peer-send", [
-          "/claude-peer-send <name> | <message>",
-          "Example: /claude-peer-send worker1 | Continue with the next batch and report back when done.",
-        ].join("\n"));
-        return;
-      }
-
-      sendCommandMessage(pi, {
-        level: "info",
-        command: "claude-peer-send",
-        title: `Sent to peer: ${name}`,
-        body: formatQuotedTextBlock(truncate(message, 4_000)),
-      });
-
-      const peer = await bridge.send(name, {
-        from: "pi-user",
-        text: message,
-      }, { waitForIdle: false });
-      peerNameCache.add(name);
-      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer message sent: ${name}`);
-      sendCommandMessage(pi, {
-        level: "success",
-        command: "claude-peer-send",
-        title: `Peer message delivered: ${name}`,
-        body: [
-          "delivery delivered_and_running",
-          "Do not poll; wait for the automated peer update.",
-          `state ${peer.state}`,
-          `driver ${peer.driver ?? "claude-sdk"}`,
-          `session ${peer.sessionId}`,
-        ].join("\n"),
-      });
-    },
-    (prefix) => completePeerName(prefix, peerNameCache, true),
-  );
-
-  registerClaudeCommand(
-    pi,
-    "claude-peer-interrupt",
-    "Interrupt named peer. Args: <name>",
-    async (args, ctx) => {
-      const name = args.trim();
-      if (!name || hasPlaceholderToken(name)) {
-        showUsage(pi, "claude-peer-interrupt", [
-          "/claude-peer-interrupt <name>",
-          "Example: /claude-peer-interrupt worker1",
-        ].join("\n"));
-        return;
-      }
-
-      const peer = await bridge.interrupt(name);
-      peerNameCache.add(name);
-      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer interrupted: ${peer.name}`);
-      sendCommandMessage(pi, {
-        level: "warning",
-        command: "claude-peer-interrupt",
-        title: `Peer interrupted: ${peer.name}`,
-        body: [`state ${peer.state}`, `session ${peer.sessionId}`].join("\n"),
-      });
-    },
-    (prefix) => completePeerName(prefix, peerNameCache, false),
-  );
-
-  registerClaudeCommand(
-    pi,
-    "claude-peer-stop",
-    "Stop named peer. Args: <name>",
-    async (args, ctx) => {
-      const name = args.trim();
-      if (!name || hasPlaceholderToken(name)) {
-        showUsage(pi, "claude-peer-stop", [
-          "/claude-peer-stop <name>",
-          "Example: /claude-peer-stop worker1",
-        ].join("\n"));
-        return;
-      }
-
-      const peer = await bridge.stop(name);
-      peerNameCache.delete(name);
-      peerRelaySnapshots.delete(name);
-      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer stopped: ${peer.name}`);
-      sendCommandMessage(pi, {
-        level: "warning",
-        command: "claude-peer-stop",
-        title: `Peer stopped: ${peer.name}`,
-        body: `state ${peer.state}`,
-      });
-    },
-    (prefix) => completePeerName(prefix, peerNameCache, false),
-  );
-
-  registerClaudeCommand(pi, "claude-peer-stop-all", "Stop all peers. Args: --yes", async (args, ctx) => {
-    const confirmation = args.trim();
-    const peers = await bridge.listPeers();
-    if (peers.length === 0) {
-      sendCommandMessage(pi, {
-        level: "info",
-        command: "claude-peer-stop-all",
-        title: "No peers to stop",
-      });
-      return;
-    }
-    if (confirmation !== "--yes") {
-      showUsage(pi, "claude-peer-stop-all", [
-        "This stops all retained peers in this workspace.",
-        `Peers: ${peers.map((peer) => peer.name).join(", ")}`,
-        "/claude-peer-stop-all --yes",
+  async function handlePeerAskCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
+    const [name, message] = splitArgs(args, 2);
+    if (!name || !message || hasPlaceholderToken(name, message)) {
+      showUsage(pi, command, [
+        `/${command} <name> | <message>`,
+        `Example: /${command} worker1 | Reply with exactly: peer-ok`,
       ].join("\n"));
       return;
     }
 
-    const stopped: string[] = [];
-    for (const peer of peers) {
-      await bridge.stop(peer.name);
-      peerNameCache.delete(peer.name);
-      peerRelaySnapshots.delete(peer.name);
-      stopped.push(peer.name);
+    sendCommandMessage(pi, {
+      level: "info",
+      command,
+      title: `Sent to peer: ${name}`,
+      body: formatQuotedTextBlock(truncate(message, 4_000)),
+    });
+
+    const result = await bridge.ask(name, {
+      from: "pi-user",
+      text: message,
+    });
+    peerNameCache.add(name);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer replied: ${name}`);
+    sendCommandMessage(pi, {
+      level: result.runState === "failed" ? "error" : result.runState === "interrupted" ? "warning" : "success",
+      command,
+      title: `Peer reply: ${name}`,
+      body: [`driver ${result.peer.driver ?? "claude-sdk"}`, truncate(result.reply, 1200) || "<empty reply>"].join("\n\n"),
+    });
+    await relayPeerCompletionToMain(result.peer, { force: true, reply: result.reply });
+  }
+
+  async function handlePeerSendCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
+    const [name, message] = splitArgs(args, 2);
+    if (!name || !message || hasPlaceholderToken(name, message)) {
+      showUsage(pi, command, [
+        `/${command} <name> | <message>`,
+        `Example: /${command} worker1 | Continue with the next batch and report back when done.`,
+      ].join("\n"));
+      return;
     }
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peers stopped: ${stopped.length}`);
+
+    sendCommandMessage(pi, {
+      level: "info",
+      command,
+      title: `Sent to peer: ${name}`,
+      body: formatQuotedTextBlock(truncate(message, 4_000)),
+    });
+
+    const peer = await bridge.send(name, {
+      from: "pi-user",
+      text: message,
+    }, { waitForIdle: false });
+    peerNameCache.add(name);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer message sent: ${name}`);
+    sendCommandMessage(pi, {
+      level: "success",
+      command,
+      title: `Peer message delivered: ${name}`,
+      body: [
+        "delivery delivered_and_running",
+        "Do not poll; wait for the automated peer update.",
+        `state ${peer.state}`,
+        `driver ${peer.driver ?? "claude-sdk"}`,
+        `session ${peer.sessionId}`,
+      ].join("\n"),
+    });
+  }
+
+  async function handlePeerHistoryCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
+    const [name, cursorToken, limitToken] = args.trim().split(/\s+/, 3).filter(Boolean);
+    const cursor = cursorToken == null ? undefined : Number(cursorToken);
+    const limit = limitToken == null ? undefined : Number(limitToken);
+    if (!name || hasPlaceholderToken(name)) {
+      showUsage(pi, command, [
+        `/${command} <name> [cursor] [limit]`,
+        `Example: /${command} worker1`,
+        `Example: /${command} worker1 0 20`,
+      ].join("\n"));
+      return;
+    }
+    if (cursor != null && (!Number.isFinite(cursor) || cursor < 0)) {
+      throw new Error("cursor must be a non-negative number");
+    }
+    if (limit != null && (!Number.isFinite(limit) || limit <= 0)) {
+      throw new Error("limit must be a positive number");
+    }
+
+    const target = await resolvePeerHistoryTarget(name);
+    if (!target) {
+      throw new Error(`Unknown peer ${name}`);
+    }
+    const transcript = await runtime.readTranscript(target.sessionId);
+    const page = formatPeerHistoryPage(transcript.items, {
+      cursor: cursor == null ? undefined : Math.trunc(cursor),
+      limit: limit == null ? undefined : Math.trunc(limit),
+    });
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer history: ${name}`);
+    sendCommandMessage(pi, {
+      level: "info",
+      command,
+      title: `Peer history: ${name}`,
+      body: [
+        `state ${target.state}`,
+        `driver ${target.driver ?? "-"}`,
+        `model ${target.model ?? "-"}`,
+        `session ${target.sessionId}`,
+        `cursor ${page.startCursor}..${page.endCursor} of ${page.total}`,
+        `previousCursor ${page.previousCursor ?? "-"}`,
+        `nextCursor ${page.nextCursor ?? "-"}`,
+        `history\n${formatQuotedTextBlock(page.text)}`,
+      ].join("\n\n"),
+    });
+  }
+
+  async function handlePeerInterruptCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
+    const name = args.trim();
+    if (!name || hasPlaceholderToken(name)) {
+      showUsage(pi, command, [
+        `/${command} <name>`,
+        `Example: /${command} worker1`,
+      ].join("\n"));
+      return;
+    }
+
+    const peer = await bridge.interrupt(name);
+    peerNameCache.add(name);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer interrupted: ${peer.name}`);
     sendCommandMessage(pi, {
       level: "warning",
-      command: "claude-peer-stop-all",
-      title: `Stopped ${stopped.length} peer${stopped.length === 1 ? "" : "s"}`,
-      body: stopped.join("\n"),
+      command,
+      title: `Peer interrupted: ${peer.name}`,
+      body: [`state ${peer.state}`, `session ${peer.sessionId}`].join("\n"),
     });
-  });
+  }
 
-  if (showAdvancedCommands) {
-    registerClaudeCommand(pi, "claude-subagent-run", `Advanced: run Claude subagent job. Args: <task> or <driver> | <task> (set ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
+  async function handlePeerStopCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
+    const trimmed = args.trim();
+    const tokens = trimmed.split(/\s+/).filter(Boolean);
+    const stopAll = tokens.includes("--all");
+    const confirmAll = tokens.includes("--confirm");
+
+    if (stopAll) {
+      const peers = await bridge.listPeers();
+      if (peers.length === 0) {
+        sendCommandMessage(pi, {
+          level: "info",
+          command,
+          title: "No peers to stop",
+        });
+        return;
+      }
+      if (!confirmAll) {
+        showUsage(pi, command, [
+          "This stops all retained peers in this workspace.",
+          `Peers: ${peers.map((peer) => peer.name).join(", ")}`,
+          `/${command} --all --confirm`,
+        ].join("\n"));
+        return;
+      }
+
+      const stopped: string[] = [];
+      for (const peer of peers) {
+        await bridge.stop(peer.name);
+        peerNameCache.delete(peer.name);
+        peerRelaySnapshots.delete(peer.name);
+        stopped.push(peer.name);
+      }
+      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peers stopped: ${stopped.length}`);
+      sendCommandMessage(pi, {
+        level: "warning",
+        command,
+        title: `Stopped ${stopped.length} peer${stopped.length === 1 ? "" : "s"}`,
+        body: stopped.join("\n"),
+      });
+      return;
+    }
+
+    const name = trimmed;
+    if (!name || hasPlaceholderToken(name)) {
+      showUsage(pi, command, [
+        `/${command} <name>`,
+        `/${command} --all --confirm`,
+        `Example: /${command} worker1`,
+      ].join("\n"));
+      return;
+    }
+
+    const peer = await bridge.stop(name);
+    peerNameCache.delete(name);
+    peerRelaySnapshots.delete(name);
+    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer stopped: ${peer.name}`);
+    sendCommandMessage(pi, {
+      level: "warning",
+      command,
+      title: `Peer stopped: ${peer.name}`,
+      body: `state ${peer.state}`,
+    });
+  }
+
+  function showPeerUsage(command: string): void {
+    showUsage(pi, command, [
+      `/${command} or /${command} dashboard`,
+      `/${command} dashboard advanced`,
+      `/${command} start <prompt>`,
+      `/${command} start <name> | <prompt>`,
+      `/${command} ask <name> | <message>`,
+      `/${command} send <name> | <message>`,
+      `/${command} list`,
+      `/${command} history <name> [cursor] [limit]`,
+      `/${command} interrupt <name>`,
+      `/${command} stop <name>`,
+      `/${command} stop --all --confirm`,
+    ].join("\n"));
+  }
+
+  registerExtensionCommand(pi, "peer", "Peer dashboard and controls. Args: [dashboard|start|ask|send|list|history|interrupt|stop] ...", async (args, ctx) => {
+    const trimmed = args.trim();
+    if (!trimmed) {
+      await handleDashboardCommand("", ctx, "peer");
+      return;
+    }
+
+    const [subcommandRaw = "", ...restParts] = trimmed.split(/\s+/);
+    const subcommand = subcommandRaw.toLowerCase();
+    const rest = restParts.join(" ").trim();
+
+    switch (subcommand) {
+      case "dashboard":
+        await handleDashboardCommand(rest, ctx, "peer dashboard");
+        return;
+      case "start":
+        await handlePeerStartCommand(rest, ctx, "peer start");
+        return;
+      case "ask":
+        await handlePeerAskCommand(rest, ctx, "peer ask");
+        return;
+      case "send":
+        await handlePeerSendCommand(rest, ctx, "peer send");
+        return;
+      case "list":
+        await handlePeerListCommand(ctx, "peer list");
+        return;
+      case "history":
+        await handlePeerHistoryCommand(rest, ctx, "peer history");
+        return;
+      case "interrupt":
+        await handlePeerInterruptCommand(rest, ctx, "peer interrupt");
+        return;
+      case "stop":
+        await handlePeerStopCommand(rest, ctx, "peer stop");
+        return;
+      case "help":
+      case "--help":
+      case "-h":
+        showPeerUsage("peer");
+        return;
+      default:
+        showPeerUsage("peer");
+    }
+  }, (prefix) => completePeerCommand(prefix, peerNameCache));
+
+  if (showLegacyCommands && showAdvancedCommands) {
+    registerExtensionCommand(pi, "claude-dev-ping", `Legacy advanced: proof that ${EXTENSION_NAME} reloaded successfully (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (_args, ctx) => {
+      const sessions = await runtime.list();
+      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Ping ok · s=${sessions.length}`);
+      sendCommandMessage(pi, {
+        level: "success",
+        command: "claude-dev-ping",
+        title: "Ping ok",
+        body: `sessions ${sessions.length}`,
+      });
+    });
+  }
+
+  if (showLegacyCommands) {
+    registerExtensionCommand(pi, "claude-dashboard", `Legacy: use /peer dashboard instead (set ${LEGACY_COMMANDS_ENV}=1 to enable)`, (args, ctx) => handleDashboardCommand(args, ctx, "claude-dashboard"));
+    registerExtensionCommand(pi, "claude-peer-start", `Legacy: use /peer start instead (set ${LEGACY_COMMANDS_ENV}=1 to enable)`, (args, ctx) => handlePeerStartCommand(args, ctx, "claude-peer-start"));
+    registerExtensionCommand(pi, "claude-peer-list", `Legacy: use /peer list instead (set ${LEGACY_COMMANDS_ENV}=1 to enable)`, (_args, ctx) => handlePeerListCommand(ctx, "claude-peer-list"));
+    registerExtensionCommand(pi, "claude-peer-ask", `Legacy: use /peer ask instead (set ${LEGACY_COMMANDS_ENV}=1 to enable)`, (args, ctx) => handlePeerAskCommand(args, ctx, "claude-peer-ask"), (prefix) => completePeerName(prefix, peerNameCache, true));
+    registerExtensionCommand(pi, "claude-peer-send", `Legacy: use /peer send instead (set ${LEGACY_COMMANDS_ENV}=1 to enable)`, (args, ctx) => handlePeerSendCommand(args, ctx, "claude-peer-send"), (prefix) => completePeerName(prefix, peerNameCache, true));
+    registerExtensionCommand(pi, "claude-peer-interrupt", `Legacy: use /peer interrupt instead (set ${LEGACY_COMMANDS_ENV}=1 to enable)`, (args, ctx) => handlePeerInterruptCommand(args, ctx, "claude-peer-interrupt"), (prefix) => completePeerName(prefix, peerNameCache, false));
+    registerExtensionCommand(pi, "claude-peer-stop", `Legacy: use /peer stop instead (set ${LEGACY_COMMANDS_ENV}=1 to enable)`, (args, ctx) => handlePeerStopCommand(args, ctx, "claude-peer-stop"), (prefix) => completePeerName(prefix, peerNameCache, false));
+    registerExtensionCommand(pi, "claude-peer-stop-all", `Legacy: use /peer stop --all --confirm instead (set ${LEGACY_COMMANDS_ENV}=1 to enable)`, async (args, ctx) => {
+      const converted = args.trim() === "--yes" ? "--all --confirm" : "--all";
+      await handlePeerStopCommand(converted, ctx, "claude-peer-stop-all");
+    });
+  }
+
+  if (showLegacyCommands && showAdvancedCommands) {
+    registerExtensionCommand(pi, "claude-subagent-run", `Legacy advanced: run Claude subagent job. Args: <task> or <driver> | <task> (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
       const parsed = parseSubagentRunCommandInput(args);
       if (!parsed.task) {
         showUsage(pi, "claude-subagent-run", [
@@ -1604,7 +1705,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
     });
 
-    registerClaudeCommand(pi, "claude-subagent-list", `Advanced: list Claude subagent runs (set ${ADVANCED_COMMANDS_ENV}=1)`, async (_args, ctx) => {
+    registerExtensionCommand(pi, "claude-subagent-list", `Advanced: list Claude subagent runs (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (_args, ctx) => {
       const runs = await subagents.listRuns();
       const attentionViews = listAttentionViews(attentionLedger, runs, Date.now());
       const attentionByRunId = new Map(attentionViews.map((view) => [view.run.runId, describeAttentionState(view, Date.now())]));
@@ -1622,7 +1723,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
     });
 
-    registerClaudeCommand(pi, "claude-subagent-status", `Advanced: show Claude subagent run status. Args: <runId> (set ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
+    registerExtensionCommand(pi, "claude-subagent-status", `Advanced: show Claude subagent run status. Args: <runId> (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
       const runId = args.trim();
       if (!runId) {
         showUsage(pi, "claude-subagent-status", "/claude-subagent-status <runId>");
@@ -1656,7 +1757,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
     });
 
-    registerClaudeCommand(pi, "claude-attention-list", `Advanced: list runs that currently need attention (set ${ADVANCED_COMMANDS_ENV}=1)`, async (_args, ctx) => {
+    registerExtensionCommand(pi, "claude-attention-list", `Advanced: list runs that currently need attention (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (_args, ctx) => {
       const attention = await syncAttentionLedger();
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Attention · ${attention.active.length}`);
       sendCommandMessage(pi, {
@@ -1667,7 +1768,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
     });
 
-    registerClaudeCommand(pi, "claude-attention-ack", `Advanced: acknowledge noisy attention for a run. Args: <runId-prefix> (set ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
+    registerExtensionCommand(pi, "claude-attention-ack", `Advanced: acknowledge noisy attention for a run. Args: <runId-prefix> (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
       const token = args.trim();
       if (!token) {
         showUsage(pi, "claude-attention-ack", "/claude-attention-ack <runId-prefix>");
@@ -1687,7 +1788,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
     });
 
-    registerClaudeCommand(pi, "claude-attention-snooze", `Advanced: snooze noisy attention for a run. Args: <runId-prefix> [minutes] (set ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
+    registerExtensionCommand(pi, "claude-attention-snooze", `Advanced: snooze noisy attention for a run. Args: <runId-prefix> [minutes] (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
       const [token, minutesToken] = args.trim().split(/\s+/, 2).filter(Boolean);
       if (!token) {
         showUsage(pi, "claude-attention-snooze", "/claude-attention-snooze <runId-prefix> [minutes]");
@@ -1714,7 +1815,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
     });
 
-    registerClaudeCommand(pi, "claude-team-spawn", `Advanced: spawn Claude teammate. Args: <name> | <prompt> | [driver] (set ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
+    registerExtensionCommand(pi, "claude-team-spawn", `Advanced: spawn Claude teammate. Args: <name> | <prompt> | [driver] (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
       const parsed = parseTeamSpawnCommandInput(args);
       if (!parsed.name || !parsed.prompt) {
         showUsage(pi, "claude-team-spawn", [
@@ -1742,7 +1843,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
     });
 
-    registerClaudeCommand(pi, "claude-team-task", `Advanced: assign task to Claude teammate. Args: <name> | <title> | <details> (set ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
+    registerExtensionCommand(pi, "claude-team-task", `Advanced: assign task to Claude teammate. Args: <name> | <title> | <details> (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
       const [name, title, details] = splitArgs(args, 3);
       if (!name || !title || !details) {
         showUsage(pi, "claude-team-task", "/claude-team-task <name> | <title> | <details>");
@@ -1766,7 +1867,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
     });
 
-    registerClaudeCommand(pi, "claude-team-message", `Advanced: message Claude teammate. Args: <name> | <message> (set ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
+    registerExtensionCommand(pi, "claude-team-message", `Advanced: message Claude teammate. Args: <name> | <message> (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
       const [name, message] = splitArgs(args, 2);
       if (!name || !message) {
         showUsage(pi, "claude-team-message", "/claude-team-message <name> | <message>");
@@ -1783,7 +1884,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
     });
 
-    registerClaudeCommand(pi, "claude-team-list", `Advanced: list Claude teammates and tasks (set ${ADVANCED_COMMANDS_ENV}=1)`, async (_args, ctx) => {
+    registerExtensionCommand(pi, "claude-team-list", `Advanced: list Claude teammates and tasks (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (_args, ctx) => {
       const teammates = await teams.listTeammates();
       const tasks = await teams.listTasks();
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Team/Todo · ${teammates.length}/${tasks.length}`);
@@ -1801,7 +1902,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
     });
 
-    registerClaudeCommand(pi, "claude-team-stop", `Advanced: stop Claude teammate. Args: <name> (set ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
+    registerExtensionCommand(pi, "claude-team-stop", `Advanced: stop Claude teammate. Args: <name> (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (args, ctx) => {
       const name = args.trim();
       if (!name) {
         showUsage(pi, "claude-team-stop", "/claude-team-stop <name>");
@@ -1819,7 +1920,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
     });
 
-    registerClaudeCommand(pi, "claude-runtime-list", `Advanced: list raw runtime sessions (set ${ADVANCED_COMMANDS_ENV}=1)`, async (_args, ctx) => {
+    registerExtensionCommand(pi, "claude-runtime-list", `Advanced: list raw runtime sessions (set ${LEGACY_COMMANDS_ENV}=1 and ${ADVANCED_COMMANDS_ENV}=1)`, async (_args, ctx) => {
       const sessions = await runtime.list();
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Runtime · ${sessions.length}`);
       sendCommandMessage(pi, {
@@ -1834,7 +1935,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   }
 }
 
-function registerClaudeCommand(
+function registerExtensionCommand(
   pi: ExtensionAPI,
   name: string,
   description: string,
@@ -1867,7 +1968,7 @@ function sendCommandMessage(
 ): void {
   pi.sendMessage(
     {
-      customType: "claude-command-result",
+      customType: "peer-command-result",
       content: input.body ?? "",
       display: true,
       details: {
@@ -1918,7 +2019,7 @@ async function refreshDashboard(
   });
   if (newSignature !== lastWidgetSignature) {
     lastWidgetSignature = newSignature;
-    ctx.ui.setWidget("claude-dashboard", createDashboardWidget(data.snapshot));
+    ctx.ui.setWidget("peer-dashboard", createDashboardWidget(data.snapshot));
   }
   return data;
 }
@@ -1929,7 +2030,7 @@ function createDashboardWidget(snapshot: DashboardSnapshot) {
     render(width: number): string[] {
       const widgetRows = snapshot.peerRows.filter(isPeerVisibleInWidget);
       const health = getPeerFirstHealth(widgetRows, snapshot.transportDegraded);
-      const title = theme.fg("accent", "Runtime Peers");
+      const title = theme.fg("accent", "Peers");
       const badge = health === "warning"
         ? theme.fg("warning", "● warning")
         : health === "active"
@@ -1939,10 +2040,10 @@ function createDashboardWidget(snapshot: DashboardSnapshot) {
 
       if (snapshot.peerRows.length === 0) {
         lines.push(truncateToWidth("no peers yet", width));
-        lines.push(truncateToWidth(theme.fg("dim", "hint  /claude-peer-start <task or prompt>"), width));
+        lines.push(truncateToWidth(theme.fg("dim", "hint  /peer start <task or prompt>"), width));
       } else if (widgetRows.length === 0) {
         lines.push(truncateToWidth("no active peers", width));
-        lines.push(truncateToWidth(theme.fg("dim", "stopped peers in /claude-dashboard"), width));
+        lines.push(truncateToWidth(theme.fg("dim", "stopped peers in /peer dashboard"), width));
       } else {
         const nameWidth = Math.min(12, Math.max(4, ...widgetRows.map((row) => row.name.length)));
         const stateWidth = Math.min(9, Math.max(4, ...widgetRows.map((row) => row.state.length)));
@@ -2040,6 +2141,28 @@ async function collectDashboardData(
   };
 }
 
+function completePeerCommand(prefix: string, names: Set<string>): AutocompleteItem[] | null {
+  const trimmedStart = prefix.trimStart();
+  const [subcommand = "", ...restParts] = trimmedStart.split(/\s+/);
+  const endsWithSpace = /\s$/.test(trimmedStart);
+  const subcommands = ["dashboard", "start", "ask", "send", "list", "history", "interrupt", "stop", "help"];
+
+  if (!subcommand || (!endsWithSpace && restParts.length === 0)) {
+    const matches = subcommands
+      .filter((item) => item.startsWith(subcommand.toLowerCase()))
+      .map((item) => ({ value: `${item} `, label: item }));
+    return matches.length > 0 ? matches : null;
+  }
+
+  if (["ask", "send"].includes(subcommand)) {
+    return completePeerName(restParts.join(" "), names, true);
+  }
+  if (["history", "interrupt", "stop"].includes(subcommand)) {
+    return completePeerName(restParts.join(" "), names, false);
+  }
+  return null;
+}
+
 function completePeerName(prefix: string, names: Set<string>, appendPipe: boolean): AutocompleteItem[] | null {
   if (prefix.includes("|")) {
     return null;
@@ -2095,7 +2218,7 @@ function formatPeerList(rows: PeerActivityRow[]): string {
   if (rows.length === 0) {
     return [
       "No peers yet.",
-      "hint  /claude-peer-start <task or prompt>",
+      "hint  /peer start <task or prompt>",
     ].join("\n");
   }
 

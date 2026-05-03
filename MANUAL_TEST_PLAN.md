@@ -67,7 +67,7 @@ Internal slash commands are hidden in the default UX.
 If you want to exercise `/claude-dev-ping`, `/claude-runtime-list`, `/claude-subagent-*`, `/claude-attention-*`, or `/claude-team-*`, start pi with:
 
 ```bash
-PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1 pi
+PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1 PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1 pi
 ```
 
 ## Recommended clean start
@@ -114,13 +114,13 @@ PI_CLAUDE_RUNTIME_DRIVER=codex-cli pi
 Expected early checks:
 - extension loads without obvious startup failure
 - widget appears eventually
-- `/claude-dashboard` works
+- `/peer dashboard` works
 - dashboard event shows the expected default driver for this pi process
 
 Command:
 
 ```text
-/claude-dashboard
+/peer dashboard
 ```
 
 Expected:
@@ -132,8 +132,8 @@ Expected:
 Run:
 
 ```text
-/claude-dashboard
-/claude-peer-list
+/peer dashboard
+/peer list
 ```
 
 Expected:
@@ -167,7 +167,7 @@ Expected:
 ### 4.1 Start peer
 
 ```text
-/claude-peer-start worker1 | You are a brief worker. Reply briefly.
+/peer start worker1 | You are a brief worker. Reply briefly.
 ```
 
 Expected:
@@ -178,7 +178,7 @@ Expected:
 ### 4.2 Ask peer
 
 ```text
-/claude-peer-ask worker1 | Reply with exactly: peer-ok
+/peer ask worker1 | Reply with exactly: peer-ok
 ```
 
 Expected:
@@ -189,7 +189,7 @@ Expected:
 ### 4.3 List peer
 
 ```text
-/claude-peer-list
+/peer list
 ```
 
 Expected:
@@ -199,8 +199,8 @@ Expected:
 ### 4.4 Stop peer
 
 ```text
-/claude-peer-stop worker1
-/claude-peer-list
+/peer stop worker1
+/peer list
 ```
 
 Expected:
@@ -293,7 +293,7 @@ This phase checks persisted restore behavior.
 Do **not** stop these yet:
 
 ```text
-/claude-peer-start persist-peer | You are a persistent peer. Reply briefly.
+/peer start persist-peer | You are a persistent peer. Reply briefly.
 /claude-team-spawn persist-team | You are a persistent teammate. Reply briefly.
 /claude-team-task persist-team | Persisted task | Confirm you survive restart.
 ```
@@ -310,9 +310,9 @@ Close the pi session/process.
 After restart, run:
 
 ```text
-/claude-peer-list
+/peer list
 /claude-team-list
-/claude-dashboard
+/peer dashboard
 ```
 
 Expected:
@@ -323,7 +323,7 @@ Expected:
 ### 7.4 Cleanup restored objects
 
 ```text
-/claude-peer-stop persist-peer
+/peer stop persist-peer
 /claude-team-stop persist-team
 ```
 
@@ -339,7 +339,7 @@ This phase is environment-dependent.
 Run:
 
 ```text
-/claude-dashboard
+/peer dashboard
 ```
 
 Observe whether intercom is shown as:
@@ -476,7 +476,7 @@ Expected:
 If any persistent objects remain, stop them:
 
 ```text
-/claude-peer-list
+/peer list
 /claude-team-list
 ```
 

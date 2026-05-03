@@ -37,8 +37,8 @@ async function ensurePiTuiStub(): Promise<void> {
     exports: "./index.js",
   }, null, 2)}\n`, "utf8");
   await writeFile(join(dir, "index.js"), [
-    "export class Box { constructor() {} addChild() {} }",
-    "export class Text { constructor() {} }",
+    "export class Box { constructor() { this.children = []; } addChild(child) { this.children.push(child); } }",
+    "export class Text { constructor(text) { this.text = text; } }",
     "export function truncateToWidth(text, width, suffix = '…') {",
     "  const value = String(text);",
     "  return value.length <= width ? value : value.slice(0, Math.max(0, width - suffix.length)) + suffix;",
@@ -49,7 +49,7 @@ async function ensurePiTuiStub(): Promise<void> {
 }
 
 async function createCodexStub(delayMs = 0): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "cca-codex-stub-"));
+  const dir = await mkdtemp(join(tmpdir(), "pi-ca-leash-codex-stub-"));
   const executable = join(dir, "codex");
   await writeFile(executable, [
     "#!/usr/bin/env node",
@@ -96,7 +96,7 @@ interface FakeTool {
 async function loadExtensionHarness(defaultDriver: "claude-sdk" | "codex-cli", options: { codexDelayMs?: number } = {}) {
   await ensurePiTuiStub();
   const codexExecutable = await createCodexStub(options.codexDelayMs ?? 0);
-  const tempCwd = await mkdtemp(join(tmpdir(), "cca-extension-tools-"));
+  const tempCwd = await mkdtemp(join(tmpdir(), "pi-ca-leash-extension-tools-"));
   const previousCwd = process.cwd();
   const previousDefaultDriver = process.env.PI_CLAUDE_RUNTIME_DRIVER;
   const previousCodexExecutable = process.env.CODEX_CLI_EXECUTABLE;

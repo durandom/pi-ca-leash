@@ -1,7 +1,7 @@
 {
   "name": "pi-ca-leash",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Runtime-first Claude Code leash extension for pi",
   "type": "module",
   "keywords": [
@@ -34,9 +34,20 @@
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*"
   },
+  "peerDependenciesMeta": {
+    "@mariozechner/pi-coding-agent": {
+      "optional": true
+    },
+    "@mariozechner/pi-tui": {
+      "optional": true
+    }
+  },
   "dependencies": {
     "@types/node": "^24.9.1",
     "typescript": "^5.9.3"
+  },
+  "overrides": {
+    "@anthropic-ai/sdk": "0.92.0"
   },
   "devDependencies": {
     "tsx": "^4.20.6"

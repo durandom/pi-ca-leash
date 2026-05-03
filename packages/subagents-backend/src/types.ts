@@ -4,7 +4,6 @@ import type {
   RuntimeEvent,
   RuntimeSessionId,
   RuntimeSessionState,
-  RuntimeStatus,
 } from "@pi-claude-code-agent/runtime";
 
 export type SubagentRunner = "pi" | "claude-code-agent";

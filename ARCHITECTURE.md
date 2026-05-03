@@ -61,7 +61,7 @@ Important consequence:
 - the bridge still works locally without live broker presence
 - peers may now be runtime-backed by different drivers
 - extension startup can choose the default peer driver via `PI_CLAUDE_RUNTIME_DRIVER`
-- the default extension UX still has no per-peer driver selection
+- public peer examples stay driver-agnostic; experimental Codex selection is primarily via startup default or LLM-callable tools
 
 ### 3. Subagent backend layer
 

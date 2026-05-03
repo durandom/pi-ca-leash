@@ -21,7 +21,7 @@ This file is intentionally blunt.
    - Bridge peers can carry driver identity, including `driver: "codex-cli"`.
    - Extension startup can select Codex as the default driver for new peers via `PI_CLAUDE_RUNTIME_DRIVER=codex-cli`.
    - Per-peer driver override exists on the LLM-callable `peer_start` tool.
-   - Default slash-command peer UX still has no per-peer driver selection.
+   - Public slash-command peer docs stay driver-agnostic; treat Codex selection as experimental even where compatibility paths can thread it.
    - Subagents and teams backend APIs, demo CLIs, and LLM-callable tools can thread driver selection, but slash-command/visual extension UX still does not expose subagent/team driver selection.
    - Workspace tests do not require a real `codex` binary, but local smoke validation can use a real one.
    - Context-window percentage is currently Claude SDK-derived only; Codex-backed peers show no `ctx` value unless a trustworthy context window can be derived later.
@@ -57,8 +57,8 @@ This file is intentionally blunt.
    - There is no sophisticated queueing/scheduling layer yet.
 
 11. **Peer auto-naming is heuristic.**
-    - Default `/claude-peer-start <prompt>` derives a short readable name from prompt text.
-    - Use `/claude-peer-start <name> | <prompt>` when you need an exact stable name.
+    - Default `/peer start <prompt>` derives a short readable name from prompt text.
+    - Use `/peer start <name> | <prompt>` when you need an exact stable name.
 
 12. **Peer working directory is fixed at start time.**
     - Peer tools can choose `cwd` when starting a peer.
@@ -67,8 +67,9 @@ This file is intentionally blunt.
 13. **Default peer UX is intentionally compressed.**
     - The main window does not stream live peer transcript output.
     - Peer completion is relayed back as one wrapped follow-up turn instead of live transcript spam.
-    - Detailed retained backend diagnostics live in `/claude-dashboard advanced`.
-    - Internal slash commands stay hidden unless you start pi with `PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1`.
+    - Detailed retained backend diagnostics live in `/peer dashboard advanced`.
+    - Legacy `/claude-*` slash commands stay hidden unless you start pi with `PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1`.
+    - Old internal diagnostic slash commands also require `PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1`.
 
 ## Documentation limits
 

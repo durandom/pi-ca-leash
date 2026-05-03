@@ -14,7 +14,7 @@ import {
 } from "./persistence.js";
 import { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js";
 import { CodexCliDriver } from "./drivers/codex-cli.js";
-import type { NormalizedDriverMessage, NormalizedDriverMessageBlock } from "./drivers/messages.js";
+import type { NormalizedDriverMessageBlock } from "./drivers/messages.js";
 import type {
   DriverEventEnvelope,
   ErrorEvent,
@@ -168,7 +168,7 @@ export class ClaudeCodeRuntime {
   }
 
   async stop(sessionId: RuntimeSessionId): Promise<RuntimeStatus> {
-    const status = await this.requireSession(sessionId);
+    await this.requireSession(sessionId);
     const active = this.activeRuns.get(sessionId);
     if (active) {
       active.handle.kill("SIGINT");
