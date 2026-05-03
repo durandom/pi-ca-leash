@@ -142,6 +142,7 @@ Responsibility:
 - map runtime drivers to model-provider catalogs
 - expose known model ids, labels, context windows, token limits, modality flags, and rough per-million-token costs
 - expose a small deterministic alias map for common shorthand names, resolved before launching a runtime call
+- expose a short advisory recommendation list for common use cases such as architecture, coding, quick checks, and cheap worker tasks
 - provide advisory model-selection notes for `/peer`, `runtime_models`, and LLM-callable runtime tools
 
 Current mapping:
@@ -150,6 +151,7 @@ Current mapping:
 
 Important consequence:
 - the catalog is not an entitlement authority
+- recommendation use cases are local product guidance, not upstream provider guarantees
 - aliases only normalize shorthand into exact ids from the bundled catalog; they do not guarantee local provider access
 - unknown model ids are passed through to the runtime instead of being hard-rejected
 - actual availability can still differ by installed CLI version, account, region, and provider rollout state

@@ -9,11 +9,13 @@ test("model catalog maps runtime drivers to Lanista provider snapshots", () => {
   assert.equal(claude.provider, "anthropic");
   assert.equal(claude.defaultModel, "claude-opus-4-7");
   assert.equal(claude.aliases.sonnet, "claude-sonnet-4-6");
+  assert.deepEqual(claude.recommendations.map((entry) => entry.alias), ["opus", "sonnet", "haiku"]);
   assert.ok(findRuntimeModel("claude-sdk", "claude-sonnet-4-6"));
 
   assert.equal(codex.provider, "openai-codex");
   assert.equal(codex.defaultModel, "gpt-5.5");
   assert.equal(codex.aliases.mini, "gpt-5.4-mini");
+  assert.deepEqual(codex.recommendations.map((entry) => entry.alias), ["default", "codex", "mini", "spark"]);
   assert.ok(findRuntimeModel("codex-cli", "gpt-5.4-mini"));
 });
 

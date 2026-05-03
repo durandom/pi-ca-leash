@@ -16,10 +16,17 @@ export interface RuntimeDriverModelCatalog {
   provider: "anthropic" | "openai-codex";
   defaultModel: string;
   aliases: Record<string, string>;
+  recommendations: RuntimeModelRecommendation[];
   cli: string;
   flag: string;
   source: string;
   models: RuntimeModelCatalogEntry[];
+}
+
+export interface RuntimeModelRecommendation {
+  alias: string;
+  model: string;
+  useCase: string;
 }
 
 export interface RuntimeModelSelection {
@@ -42,6 +49,11 @@ export const RUNTIME_MODEL_CATALOGS: Record<RuntimeDriverName, RuntimeDriverMode
       opus: "claude-opus-4-7",
       sonnet: "claude-sonnet-4-6",
     },
+    recommendations: [
+      { alias: "opus", model: "claude-opus-4-7", useCase: "architecture, hard review, long-context planning" },
+      { alias: "sonnet", model: "claude-sonnet-4-6", useCase: "coding, refactors, implementation reviews" },
+      { alias: "haiku", model: "claude-haiku-4-5", useCase: "quick checks, cheap parallel workers, summaries" },
+    ],
     cli: "claude-code",
     flag: "claude --model <id>",
     source: LANISTA_SOURCE,
@@ -80,6 +92,12 @@ export const RUNTIME_MODEL_CATALOGS: Record<RuntimeDriverName, RuntimeDriverMode
       mini: "gpt-5.4-mini",
       spark: "gpt-5.3-codex-spark",
     },
+    recommendations: [
+      { alias: "default", model: "gpt-5.5", useCase: "architecture, hard debugging, broad repo analysis" },
+      { alias: "codex", model: "gpt-5.3-codex", useCase: "coding, tests, focused refactors" },
+      { alias: "mini", model: "gpt-5.4-mini", useCase: "quick edits, cheap exploration, small reviews" },
+      { alias: "spark", model: "gpt-5.3-codex-spark", useCase: "fast text-only worker tasks" },
+    ],
     cli: "codex",
     flag: "codex --model <id>",
     source: LANISTA_SOURCE,
@@ -131,7 +149,7 @@ export function resolveRuntimeModelSelection(driver: RuntimeDriverName, model?: 
     };
   }
 
-  const entryNote = `model ${entry.id} (${entry.name}, ctx ${entry.contextWindow}, max ${entry.maxTokens})`;
+  const entryNote = `model ${entry.id} (${entry.name}, context window ${entry.contextWindow}, max output ${entry.maxTokens})`;
   if (aliasTarget) {
     return {
       requestedModel,

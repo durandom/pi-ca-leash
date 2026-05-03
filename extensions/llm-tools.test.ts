@@ -209,7 +209,15 @@ test("runtime_models exposes driver-specific Lanista catalog", async () => {
     const text = String(listed.content?.[0]?.text ?? "");
     assert.match(text, /codex-cli models/);
     assert.match(text, /default gpt-5\.5/);
+    assert.match(text, /best for/);
+    assert.match(text, /context window=input token capacity/);
     assert.match(text, /gpt-5\.4-mini/);
+    assert.doesNotMatch(text, /gpt-5\.1-codex-max/);
+
+    const verbose = await harness.execute("runtime_models", { driver: "codex-cli", verbose: true });
+    const verboseText = String(verbose.content?.[0]?.text ?? "");
+    assert.match(verboseText, /max output/);
+    assert.match(verboseText, /gpt-5\.1-codex-max/);
     assert.equal(listed.details.catalogs[0].driver, "codex-cli");
   } finally {
     await harness.close();

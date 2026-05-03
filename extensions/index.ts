@@ -501,27 +501,29 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "runtime_models",
     label: "Runtime Models",
-    description: "List the bundled Lanista-derived model catalog for Claude SDK and Codex CLI runtime drivers.",
+    description: "List recommended runtime models, or the full bundled Lanista-derived model catalog in verbose mode.",
     promptSnippet: RUNTIME_MODELS_TOOL_PROMPT.snippet,
     promptGuidelines: RUNTIME_MODELS_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
         driver: { type: "string", enum: ["claude-sdk", "codex-cli"], description: "Optional runtime driver to filter the model catalog." },
+        verbose: { type: "boolean", description: "When true, include every model from the bundled catalog instead of the short recommended list." },
       },
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params) {
-      const input = params as { driver?: unknown };
+      const input = params as { driver?: unknown; verbose?: unknown };
       const driver = input.driver == null ? undefined : parseRuntimeDriverName(input.driver);
       if (input.driver != null && !driver) {
         throw new Error("driver must be claude-sdk or codex-cli");
       }
+      const verbose = input.verbose === true;
       const catalogs = modelCatalogsForDriver(driver);
       return {
         content: [{
           type: "text",
-          text: formatModelCatalogReport(catalogs),
+          text: formatModelCatalogReport(catalogs, { verbose }),
         }],
         details: { catalogs },
       };
@@ -1517,18 +1519,14 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
 
   async function handlePeerModelsCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
     await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
-    const rawDriver = args.trim();
-    const driver = rawDriver ? parseRuntimeDriverName(rawDriver) : undefined;
-    if (rawDriver && !driver) {
-      throw new Error("driver must be claude-sdk or codex-cli");
-    }
+    const { driver, verbose } = parsePeerModelsArgs(args);
     const catalogs = modelCatalogsForDriver(driver);
     await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, "Runtime models");
     sendCommandMessage(pi, {
       level: "info",
       command,
       title: driver ? `Runtime models: ${driver}` : "Runtime models",
-      body: formatModelCatalogReport(catalogs),
+      body: formatModelCatalogReport(catalogs, { verbose }),
     });
   }
 
@@ -1775,7 +1773,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         `/${command} ask <name> | <message>`,
         `/${command} send <name> | <message>`,
         `/${command} list`,
-        `/${command} models [claude-sdk|codex-cli]`,
+        `/${command} models [claude-sdk|codex-cli] [all|advanced|verbose]`,
         `/${command} history <name> [cursor] [limit]`,
         `/${command} interrupt <name>`,
         `/${command} stop <name>`,
@@ -2696,27 +2694,73 @@ function formatAttentionReport(attention: AttentionView[]): string {
   );
 }
 
-function formatModelCatalogReport(catalogs: RuntimeDriverModelCatalog[]): string {
+function parsePeerModelsArgs(args: string): { driver?: "claude-sdk" | "codex-cli"; verbose: boolean } {
+  let driver: "claude-sdk" | "codex-cli" | undefined;
+  let verbose = false;
+  for (const token of args.trim().split(/\s+/).filter(Boolean)) {
+    const parsedDriver = parseRuntimeDriverName(token);
+    if (parsedDriver) {
+      driver = parsedDriver;
+      continue;
+    }
+    if (["all", "advanced", "verbose", "--all", "--advanced", "--verbose"].includes(token.toLowerCase())) {
+      verbose = true;
+      continue;
+    }
+    throw new Error("usage: /peer models [claude-sdk|codex-cli] [all|advanced|verbose]");
+  }
+  return { driver, verbose };
+}
+
+function formatModelCatalogReport(catalogs: RuntimeDriverModelCatalog[], options: { verbose?: boolean } = {}): string {
   return catalogs.map((catalog) => {
-    const rows = catalog.models.map((model) => [
-      model.id === catalog.defaultModel ? `${model.id} *` : model.id,
-      model.name,
-      String(model.contextWindow),
-      String(model.maxTokens),
-      model.reasoning ? "yes" : "no",
-      `$${model.inputCostPerMillion}/$${model.outputCostPerMillion}`,
-    ]);
-    return [
+    const verbose = options.verbose === true;
+    const rows = verbose ? formatFullModelCatalogRows(catalog) : formatRecommendedModelCatalogRows(catalog);
+    const sections = [
       `${catalog.driver} models`,
       `provider ${catalog.provider}`,
       `default ${catalog.defaultModel}`,
       `aliases ${formatModelAliases(catalog.aliases)}`,
       `cli ${catalog.flag}`,
       `source ${catalog.source}`,
+      "columns context window=input token capacity; max output=maximum generated output tokens",
+      "guidance advisory; actual model availability depends on the installed runtime, account, region, and provider rollout",
       "",
-      formatTable(["model", "name", "ctx", "max", "reasoning", "$/M in/out"], rows),
-    ].join("\n");
+      verbose
+        ? formatTable(["model", "name", "context window", "max output", "reasoning", "$/M in/out"], rows)
+        : formatTable(["alias", "model", "name", "best for", "context window", "max output", "$/M in/out"], rows),
+    ];
+    if (!verbose) {
+      sections.push(`Use /peer models ${catalog.driver} all or runtime_models({ driver: "${catalog.driver}", verbose: true }) for the full catalog.`);
+    }
+    return sections.join("\n");
   }).join("\n\n");
+}
+
+function formatRecommendedModelCatalogRows(catalog: RuntimeDriverModelCatalog): string[][] {
+  return catalog.recommendations.map((recommendation) => {
+    const model = catalog.models.find((entry) => entry.id === recommendation.model);
+    return [
+      recommendation.alias,
+      recommendation.model === catalog.defaultModel ? `${recommendation.model} *` : recommendation.model,
+      model?.name ?? "-",
+      recommendation.useCase,
+      model ? String(model.contextWindow) : "-",
+      model ? String(model.maxTokens) : "-",
+      model ? `$${model.inputCostPerMillion}/$${model.outputCostPerMillion}` : "-",
+    ];
+  });
+}
+
+function formatFullModelCatalogRows(catalog: RuntimeDriverModelCatalog): string[][] {
+  return catalog.models.map((model) => [
+    model.id === catalog.defaultModel ? `${model.id} *` : model.id,
+    model.name,
+    String(model.contextWindow),
+    String(model.maxTokens),
+    model.reasoning ? "yes" : "no",
+    `$${model.inputCostPerMillion}/$${model.outputCostPerMillion}`,
+  ]);
 }
 
 function formatModelAliases(aliases: Record<string, string>): string {

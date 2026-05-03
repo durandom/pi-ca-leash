@@ -2,10 +2,11 @@
 
 All notable changes to this repository should be recorded here.
 
-## 0.5.0 - 2026-05-03
+## 0.6.0 - 2026-05-03
 
 ### Changed
 - Runtime model selection now resolves common shorthand aliases such as `sonnet`, `opus`, `haiku`, `mini`, and `spark` to concrete catalog model ids before launching peers, subagents, or teammates.
+- `/peer models` and `runtime_models` now show a shorter recommended model list by default, with advisory use cases and clearer `context window` / `max output` column labels; pass `all`, `advanced`, `verbose`, or `verbose: true` for the full catalog.
 - Peer/subagent/team launch surfaces now include prompt-size warnings for large delegated prompts, nudging agents toward smaller slices and file-based context.
 - `runtime_models` reports bundled model aliases alongside exact model ids.
 - Compact Peers widget rendering now uses a small adaptive table layout helper, including a wide-mode driver column and narrow-mode fallback.

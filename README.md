@@ -81,7 +81,7 @@ Primary slash-command surface:
 /peer ask <name> | <message>
 /peer send <name> | <message>
 /peer list
-/peer models [claude-sdk|codex-cli]
+/peer models [claude-sdk|codex-cli] [all|advanced|verbose]
 /peer history <name> [cursor] [limit]
 /peer interrupt <name>
 /peer stop <name>
@@ -103,7 +103,7 @@ Quick check inside pi:
 LLM-callable peer tools:
 
 ```text
-runtime_models(driver?)
+runtime_models(driver?, verbose?)
 peer_start(prompt, name?, driver?, model?, cwd?)
 peer_list()
 peer_history(name, cursor?, limit?)
@@ -154,7 +154,8 @@ Runtime driver notes:
 - `claude-sdk` is the default and most complete path
 - `codex-cli` is experimental
 - `PI_CLAUDE_RUNTIME_DRIVER=codex-cli` changes the default for newly started peers
-- `/peer models` and LLM-callable `runtime_models` expose a bundled Lanista-derived model catalog
+- `/peer models` and LLM-callable `runtime_models` show a short recommended model list by default, including advisory use cases
+- `/peer models ... all` and `runtime_models(verbose: true)` expose the full bundled Lanista-derived model catalog
 - LLM-callable `peer_start`, `peer_ask`, and `peer_send` can pass explicit model ids
 - `/peer start` can pass driver and model in pipe syntax
 - common catalog aliases such as `sonnet`, `opus`, `haiku`, `mini`, and `spark` are resolved to exact model ids before runtime launch
