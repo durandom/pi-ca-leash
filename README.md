@@ -69,6 +69,8 @@ Primary slash-command surface:
 
 ```text
 /peer
+/peer help
+/peer about
 /peer init
 /peer dashboard
 /peer dashboard advanced
@@ -89,6 +91,7 @@ Primary slash-command surface:
 Quick check inside pi:
 
 ```text
+/peer about
 /peer init
 /peer models codex-cli
 /peer start reviewer | Review this repo briefly and report one concrete risk.
@@ -137,7 +140,7 @@ PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1 PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1 pi
 
 ## Behavior
 
-The extension is lazy. Loading it registers commands and tools, but it does not start the Peers widget, background monitor, or intercom transport checks immediately. `/peer init` activates the peer workflow and prints the working guide. The first actionable `/peer` command, such as `/peer models`, `/peer dashboard`, `/peer list`, or `/peer start`, also activates it and shows that guide once. `/peer help` stays passive.
+The extension is lazy. Loading it registers commands and tools, but it does not start the Peers widget, background monitor, or intercom transport checks immediately. `/peer init` activates the peer workflow and prints the working guide. The first actionable `/peer` command, such as `/peer models`, `/peer dashboard`, `/peer list`, or `/peer start`, also activates it and shows that guide once. `/peer help` and `/peer about` stay passive. `/peer about` prints the installed package version, package root, state root, default driver, and session mode.
 
 Peers are asynchronous workers. The main agent should start a peer, continue useful work, and wait for the automatic peer completion, blocked, or failure relay. It should not poll `peer_list`, `peer_history`, or repeated `peer_ask` just to see whether the peer is done.
 

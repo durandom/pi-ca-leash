@@ -1,6 +1,6 @@
 {
   "name": "@pi-claude-code-agent/intercom-bridge",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "type": "module",
   "description": "Thin intercom-style bridge for Claude Code runtime sessions",
   "main": "./dist/index.js",

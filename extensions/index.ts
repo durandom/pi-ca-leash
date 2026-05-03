@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, resolve } from "node:path";
 import { ClaudeRuntimeIntercomBridge, extractReplyText, type BridgePeer, PiIntercomTransport } from "@pi-claude-code-agent/intercom-bridge";
 import { ClaudeCodeRuntime, type RuntimeEvent, type RuntimeMessageBlock } from "@pi-claude-code-agent/runtime";
 import { ClaudeCodeSubagentBackend } from "@pi-claude-code-agent/subagents-backend";
@@ -66,7 +67,10 @@ import {
 } from "./support.js";
 
 const EXTENSION_NAME = "pi-ca-leash";
-const EXTENSION_VERSION = "0.2.0";
+const extensionRequire = createRequire(import.meta.url);
+const EXTENSION_PACKAGE_PATH = extensionRequire.resolve("../package.json");
+const EXTENSION_PACKAGE_ROOT = dirname(EXTENSION_PACKAGE_PATH);
+const EXTENSION_VERSION = String((extensionRequire("../package.json") as { version?: string }).version ?? "0.0.0");
 const STATE_DIR_NAME = ".pi-ca-leash";
 const BACKGROUND_POLL_INTERVAL_MS = 5_000;
 const BACKGROUND_REFRESH_MIN_INTERVAL_MS = 3_000;
@@ -1736,26 +1740,75 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   }
 
   function showPeerUsage(command: string): void {
-    showUsage(pi, command, [
-      `/${command} or /${command} dashboard`,
-      `/${command} init`,
-      `/${command} dashboard advanced`,
-      `/${command} start <prompt>`,
-      `/${command} start <prompt> | <driver> | <model>`,
-      `/${command} start <name> | <prompt>`,
-      `/${command} start <name> | <prompt> | <driver> | <model>`,
-      `/${command} ask <name> | <message>`,
-      `/${command} send <name> | <message>`,
-      `/${command} list`,
-      `/${command} models [claude-sdk|codex-cli]`,
-      `/${command} history <name> [cursor] [limit]`,
-      `/${command} interrupt <name>`,
-      `/${command} stop <name>`,
-      `/${command} stop --all --confirm`,
-    ].join("\n"));
+    sendCommandMessage(pi, {
+      level: "info",
+      command,
+      title: "Peer help",
+      body: [
+        `${EXTENSION_NAME} v${EXTENSION_VERSION}`,
+        "",
+        "Concepts",
+        "- Peers are long-lived local runtime sessions, not stateless provider calls.",
+        "- Start peers for background work, then keep working while the widget and automatic relays surface updates.",
+        "- Use ask when you need a reply now; use send for fire-and-forget work.",
+        "- Use history to inspect a peer transcript without repeatedly polling for completion.",
+        "- The live intercom broker is optional. When it is offline, peers stay local.",
+        "",
+        "Common flow",
+        `1. /${command} init`,
+        `2. /${command} models`,
+        `3. /${command} start <prompt>`,
+        `4. /${command} dashboard`,
+        `5. /${command} history <name>`,
+        "",
+        "Commands",
+        `/${command} or /${command} dashboard`,
+        `/${command} about`,
+        `/${command} init`,
+        `/${command} dashboard advanced`,
+        `/${command} start <prompt>`,
+        `/${command} start <prompt> | <driver> | <model>`,
+        `/${command} start <name> | <prompt>`,
+        `/${command} start <name> | <prompt> | <driver> | <model>`,
+        `/${command} ask <name> | <message>`,
+        `/${command} send <name> | <message>`,
+        `/${command} list`,
+        `/${command} models [claude-sdk|codex-cli]`,
+        `/${command} history <name> [cursor] [limit]`,
+        `/${command} interrupt <name>`,
+        `/${command} stop <name>`,
+        `/${command} stop --all --confirm`,
+        "",
+        "Driver/model forms",
+        `/${command} start <prompt> | <driver> | <model>`,
+        `/${command} start <name> | <prompt> | <driver> | <model>`,
+        "drivers: claude-sdk, codex-cli",
+        "model aliases: sonnet, opus, haiku, mini, spark; exact ids are shown by /peer models",
+        "",
+        "Version/environment",
+        `/${command} about`,
+      ].join("\n"),
+    });
   }
 
-  registerExtensionCommand(pi, "peer", "Peer dashboard and controls. Args: [init|dashboard|start|ask|send|list|models|history|interrupt|stop] ...", async (args, ctx) => {
+  function showPeerAbout(command: string): void {
+    sendCommandMessage(pi, {
+      level: "info",
+      command,
+      title: `${EXTENSION_NAME} v${EXTENSION_VERSION}`,
+      body: [
+        `package ${EXTENSION_NAME}`,
+        `version ${EXTENSION_VERSION}`,
+        `package root ${EXTENSION_PACKAGE_ROOT}`,
+        `state root ${rootDir}`,
+        `default driver ${runtimeDriverConfig.defaultDriver}`,
+        runtimeDriverConfig.note,
+        `no-session ${noSessionMode ? "yes" : "no"}`,
+      ].filter(Boolean).join("\n"),
+    });
+  }
+
+  registerExtensionCommand(pi, "peer", "Peer dashboard and controls. Args: [about|init|dashboard|start|ask|send|list|models|history|interrupt|stop] ...", async (args, ctx) => {
     const trimmed = args.trim();
     if (!trimmed) {
       await activatePeerMode(ctx, { command: "peer", showGuide: true, reason: "Peer mode activated" });
@@ -1768,6 +1821,12 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     const rest = restParts.join(" ").trim();
 
     switch (subcommand) {
+      case "about":
+      case "version":
+      case "--version":
+      case "-v":
+        showPeerAbout("peer about");
+        return;
       case "init":
         await activatePeerMode(ctx, { command: "peer init", showGuide: true, forceGuide: true, reason: "Peer mode activated" });
         await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger);

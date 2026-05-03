@@ -181,6 +181,13 @@ test("/peer help stays passive while /peer init activates and shows guide", asyn
   try {
     const helpMessages = await harness.run("peer", "help");
     assert.match(latestBody(helpMessages), /\/peer init/);
+    assert.match(latestBody(helpMessages), /pi-ca-leash v\d+\.\d+\.\d+/);
+    assert.match(latestBody(helpMessages), /\/peer about/);
+    assert.equal(harness.widgets.has("peer-dashboard"), false);
+
+    const aboutMessages = await harness.run("peer", "about");
+    assert.match(latestBody(aboutMessages), /version \d+\.\d+\.\d+/);
+    assert.match(latestBody(aboutMessages), /default driver codex-cli/);
     assert.equal(harness.widgets.has("peer-dashboard"), false);
 
     const initMessages = await harness.run("peer", "init");
