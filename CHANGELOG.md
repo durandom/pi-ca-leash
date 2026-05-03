@@ -7,10 +7,12 @@ All notable changes to this repository should be recorded here.
 ### Changed
 - Polished README setup, persistence, and runtime-driver wording around the current local MVP.
 - Aligned workspace package versions with the root `0.2.0` package version.
+- Reworked README into the single practical entrypoint, with the useful manual smoke and peer no-polling guidance folded in.
 
 ### Removed
 - Removed the redundant direct runtime dependency on `@anthropic-ai/sdk`; the runtime imports `@anthropic-ai/claude-agent-sdk`, and the root override remains as a guard for SDK resolution through that dependency tree.
 - Removed unused internal TypeScript declarations found by `noUnusedLocals` / `noUnusedParameters` checks.
+- Removed leftover standalone manual/stress-test Markdown files from the public repo root.
 
 ## 0.2.0 - 2026-05-03
 

@@ -2,147 +2,36 @@
 
 Runtime-first Claude Code integration for pi.
 
-This repo does **not** pretend Claude Code is a stateless model provider. It treats Claude Code as a long-lived agent runtime, then builds local adapters on top of that runtime.
+This repo treats Claude Code as a long-lived local runtime, not as a stateless model provider. It builds a small local MVP around that runtime: named peers, retained subagent-style jobs, persistent teammates, and pi extension wiring.
 
 ## Status
 
-This repository is a **working local MVP**.
-
-Implemented here:
+Working local MVP:
 - Claude Code runtime package
-- intercom-style bridge package
-- subagent backend package
-- local teams backend package
-- pi extension with peer-first widget/dashboard, transport monitoring, and attention controls
+- optional experimental Codex CLI runtime driver
+- named peer bridge with optional live intercom transport
+- local subagent backend
+- local teams backend
+- pi extension with `/peer`, peer dashboard, attention state, and LLM-callable tools
 
-Not claimed here:
-- full upstream product integration with real `pi-subagents`
-- any external `pi-teams` package integration
-- real forked Claude session semantics
-- host-independent end-to-end extension smoke coverage
-
-## Documentation map
-
-Start here:
-- `README.md` — what this repo is and how to try it
-- `MANUAL_TEST_PLAN.md` — fresh-session operator checklist
-- `PEER_NO_BABYSITTING_STRESS_TEST.md` — reusable peer no-polling UX stress test
-- `ARCHITECTURE.md` — how the pieces fit together
-- `KNOWN_LIMITS.md` — explicit constraints and non-goals
-- `CHANGELOG.md` — notable changes over time
-- `AGENTS.md` — guidance for agents working inside this repo
-
-## Repository layout
-
-```text
-packages/
-  runtime/
-  intercom-bridge/
-  subagents-backend/
-  teams-backend/
-extensions/
-  index.ts
-```
-
-## Package overview
-
-### `@pi-claude-code-agent/runtime`
-Provides:
-- Claude-backed session start/resume by default
-- optional experimental `codex-cli` runtime driver
-- normalized runtime events
-- persisted session state and transcript
-- interrupt/stop lifecycle controls
-
-Truth:
-- Codex support is currently runtime-level and experimental.
-- Unsupported Codex options are rejected instead of being silently mapped to fake Claude parity.
-
-### `@pi-claude-code-agent/intercom-bridge`
-Provides:
-- named runtime-backed peers
-- `send` / `ask` / `reply` behavior
-- idle-cycle reply extraction
-- persisted peer registry with restart restore
-- optional live `pi-intercom` broker transport when reachable
-- persisted per-peer runtime driver identity
-
-Truth:
-- Bridge peers can carry `driver: "claude-sdk" | "codex-cli"`.
-- Extension peer UX can launch new peers on the configured default runtime driver.
-- Default driver can be selected at pi startup with `PI_CLAUDE_RUNTIME_DRIVER=claude-sdk|codex-cli`.
-- LLM-callable `peer_start` can override the driver per peer.
-- Public `/peer` examples stay driver-agnostic; Codex-backed peers remain experimental and can be selected globally with `PI_CLAUDE_RUNTIME_DRIVER` or per peer through the LLM-callable `peer_start` tool.
-
-### `@pi-claude-code-agent/subagents-backend`
-Provides:
-- `runner: claude-code-agent`
-- sync/async run lifecycle
-- persisted run artifacts
-- restart rehydration
-- attention events for stale background runs
-- runtime driver threading in backend API inputs
-
-Truth:
-- backend API can start runs on `claude-sdk` or `codex-cli`
-- extension UX still does not expose subagent driver selection
-- `context: fork` is rejected
-- this is local backend logic, not real upstream `pi-subagents` wiring
-
-### `@pi-claude-code-agent/teams-backend`
-Provides:
-- persistent runtime-backed teammates
-- teammate restore/reattach after restart
-- task assignment and direct messaging
-- simple task auto-classification from `DONE:` / `BLOCKED:` style replies
-- runtime driver threading in teammate spawn inputs
-
-Truth:
-- backend API can spawn teammates on `claude-sdk` or `codex-cli`
-- extension UX still does not expose teammate driver selection
-- this is a **local teams backend only**
-- no external `pi-teams` integration is planned in this repo
-
-## Extension features
-
-The pi extension in `extensions/index.ts` currently adds:
-- peer-first widget with one live row per peer, including last update time and last-known context-window percentage when available
-- peer-first `/peer` command dispatcher with `/peer dashboard` and `/peer dashboard advanced`
-- immediate visible acknowledgments for `/peer start` and `/peer ask`
-- LLM-callable peer tools: `peer_start`, `peer_list`, `peer_history`, `peer_ask`, `peer_send`, `peer_interrupt`, `peer_stop`
-- LLM-callable retained backend tools: `subagent_run`, `subagent_list`, `subagent_status`, `team_spawn`, `team_task`, `team_message`, `team_list`, `team_stop`
-- peer tool support for explicit start-time `driver`, `model`, and `cwd`, persistent model switching via `peer_ask`, and bulk peer stop through `peer_stop(all=true, confirmAll=true)`
-- scrollable peer transcript history for the main agent via `peer_history`
-- automatic wrapped follow-up turns into the main agent when a peer finishes, needs input, or errors
-- quiet main window behavior for peer work: no streamed child transcript spam
-- background dashboard refresh every 5s
-- broker disconnect/reconnect notices and late transport rebind when reachable again
-- attention notifications for noisy/stale background runs
-- legacy `/claude-*` slash commands hidden by default and only restored with `PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1`
-- persisted local attention state across pi restarts
-
-Attention state is stored at:
-
-```text
-.pi-ca-leash/extension/attention-ledger.json
-```
-
-## Requirements
-
-You need:
-- Node.js 18 or newer
-- npm
-- a working Claude Code environment for Claude-backed execution
-- a real pi installation to load the extension
-
-Optional for experimental Codex-backed runtime paths:
-- installed `codex` CLI available on `PATH`
-
-Peer dependencies expected from pi host environment:
-- `@mariozechner/pi-coding-agent`
-- `@mariozechner/pi-tui`
+Not claimed:
+- no real upstream `pi-subagents` integration
+- no external `pi-teams` integration
+- no real Claude fork/session-tree semantics
+- no host-independent full pi extension smoke test
 
 ## Install
+
+Requirements:
+- Node.js 18 or newer
+- npm
+- Claude Code configured for Claude-backed execution
+- a real pi installation to load the extension
+
+Optional:
+- `codex` on `PATH` for experimental Codex-backed runtime checks
+
+Install and verify from the repo root:
 
 ```bash
 npm install
@@ -150,74 +39,33 @@ npm test
 npm run build
 ```
 
-`npm install` runs the workspace build through `postinstall` so git-based pi installs have package `dist/` files available.
+`npm install` runs the workspace build through `postinstall`, so git-based pi installs have package `dist/` files available.
 
-## Install into pi
-
-For a pinned release install:
+Install into pi from a pinned release:
 
 ```bash
 pi install git:github.com/durandom/pi-ca-leash@v0.2.0
 ```
 
-For local development from this repository root:
+Install into pi from this checkout:
 
 ```bash
 npm install
 npm run build
-pi install /absolute/path/to/your/checkout
+pi install /absolute/path/to/pi-ca-leash
 ```
 
-To start pi with experimental Codex-backed peers as the default for new peers:
+Start pi with Codex as the default runtime driver for new peers:
 
 ```bash
 PI_CLAUDE_RUNTIME_DRIVER=codex-cli pi
 ```
 
-Notes:
-- This changes the default runtime driver for newly started peers only.
-- Existing persisted peers keep their recorded driver.
+Existing persisted peers keep their recorded driver.
 
-## 5-minute quickstart
+## Use
 
-After installing into pi, start pi in this repo and try these.
-
-### 1. Start a peer
-
-```text
-/peer start Review auth flow and reply briefly.
-```
-
-You should immediately see a start acknowledgment in the main window, including the auto-generated peer name.
-Live activity should appear in the `Peers` widget.
-When the peer finishes, the extension also injects the last peer message back into a new wrapped main-agent turn.
-
-Use an explicit override when needed:
-
-```text
-/peer start reviewer | Review auth flow and reply briefly.
-```
-
-### 2. Ask the peer
-
-```text
-/peer ask worker1 | Reply with exactly: peer-ok
-/peer list
-```
-
-### 3. Inspect the dashboard
-
-```text
-/peer
-/peer dashboard advanced
-```
-
-Default dashboard is peer-first.
-Advanced mode keeps retained backend diagnostics explicit but out of the main UX.
-
-## Command reference
-
-Primary peer UX:
+Primary slash-command surface:
 
 ```text
 /peer
@@ -234,6 +82,15 @@ Primary peer UX:
 /peer stop --all --confirm
 ```
 
+Quick check inside pi:
+
+```text
+/peer start reviewer | Review this repo briefly and report one concrete risk.
+/peer ask reviewer | Reply with exactly: peer-ok
+/peer list
+/peer dashboard advanced
+```
+
 LLM-callable peer tools:
 
 ```text
@@ -246,7 +103,7 @@ peer_interrupt(name)
 peer_stop(name?, all?, confirmAll?)
 ```
 
-LLM-callable retained backend tools:
+LLM-callable backend tools:
 
 ```text
 subagent_run(task, name?, prompt?, driver?, model?, cwd?, async?)
@@ -259,41 +116,56 @@ team_list()
 team_stop(name)
 ```
 
-Notes:
-- `cwd` is chosen when the peer starts. To change it later, start a new peer.
-- `peer_ask(..., model?)` switches the peer model persistently for later turns.
-- `peer_history` lets the main agent scroll through prior peer transcript pages using `previousCursor` and `nextCursor`.
-- `peer_history` paging is based on visible history entries, not hidden/raw transcript events.
-
-Legacy `/claude-*` slash commands are hidden by default.
-
-For compatibility-only access to the old peer commands, start pi with:
+Legacy `/claude-*` commands are hidden by default. Re-enable old peer commands only for compatibility:
 
 ```bash
 PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1 pi
 ```
 
-For development-only access to old internal diagnostics, both flags are required:
+Re-enable old internal diagnostics for development:
 
 ```bash
 PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1 PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1 pi
 ```
 
-That re-exposes legacy/internal commands such as:
+## Behavior
+
+Peers are asynchronous workers. The main agent should start a peer, continue useful work, and wait for the automatic peer completion, blocked, or failure relay. It should not poll `peer_list`, `peer_history`, or repeated `peer_ask` just to see whether the peer is done.
+
+The extension keeps peer output quiet by default:
+- peer work does not stream child transcript spam into the main window
+- peer start and ask commands show immediate acknowledgments
+- peer completion is relayed back as one wrapped follow-up turn
+- detailed backend diagnostics live in `/peer dashboard advanced`
+
+Runtime driver notes:
+- `claude-sdk` is the default and most complete path
+- `codex-cli` is experimental
+- `PI_CLAUDE_RUNTIME_DRIVER=codex-cli` changes the default for newly started peers
+- LLM-callable `peer_start`, `subagent_run`, and `team_spawn` can pass an explicit driver
+- slash-command and visual UX intentionally stay driver-light
+
+## Repository Layout
 
 ```text
-/claude-dashboard
-/claude-peer-start <prompt>
-/claude-peer-ask <name> | <message>
-/claude-subagent-run <task>
-/claude-attention-list
-/claude-team-list
-/claude-runtime-list
+packages/
+  runtime/            Claude/Codex runtime abstraction
+  intercom-bridge/    named runtime-backed peers
+  subagents-backend/  local subagent-style run backend
+  teams-backend/      local persistent teammate backend
+extensions/
+  index.ts            pi extension wiring and command/tool surface
 ```
 
-Prefer `/peer` for public UX.
+Useful docs that should remain current:
+- `ARCHITECTURE.md`
+- `KNOWN_LIMITS.md`
+- `CHANGELOG.md`
+- `AGENTS.md`
 
-## Useful workspace commands
+## Development
+
+Common commands:
 
 ```bash
 npm test
@@ -304,7 +176,7 @@ npm run demo:subagent -- "Reply with exactly: subagent-ok"
 npm run demo:teams -- "You are persistent teammate. Reply briefly."
 ```
 
-Experimental Codex-backed CLI checks:
+Experimental Codex checks:
 
 ```bash
 PI_CLAUDE_RUNTIME_DRIVER=codex-cli npm run smoke -- "Reply with exactly: codex-smoke-ok"
@@ -312,15 +184,17 @@ PI_CLAUDE_RUNTIME_DRIVER=codex-cli npm run demo:subagent -- "Reply with exactly:
 PI_CLAUDE_RUNTIME_DRIVER=codex-cli npm run demo:teams -- "Reply with exactly: codex-team-ok"
 ```
 
+Manual pi smoke checklist:
+- clean or move `.pi-ca-leash/`
+- run `npm install`, `npm test`, and `npm run build`
+- install the checkout into pi
+- run `/peer`, `/peer start`, `/peer ask`, `/peer list`, and `/peer stop`
+- run `/peer dashboard advanced` and confirm retained backend diagnostics are believable
+- restart pi and confirm persisted peers/backends restore honestly
+
 ## Persistence
 
-Repository-local state is written under:
-
-```text
-.pi-ca-leash/
-```
-
-Important subpaths:
+Repository-local runtime state is written under:
 
 ```text
 .pi-ca-leash/
@@ -333,26 +207,16 @@ Important subpaths:
 
 These paths are ignored by git. Remove `.pi-ca-leash/` when you need a clean local manual-test session.
 
-## Testing status
+Older local development state may also exist under ignored paths such as `.pi-claude-code-agent/`, `.claude-runtime/`, or `undefined/`. Those are not part of the package.
 
-Validated now:
-- `npm test` passes
-- `npm run build` passes
-- package-level behavior is covered by workspace tests
-- extension helper/state logic is covered by direct tests in `extensions/*.test.ts`
+## Limits
 
-## Known limits
+The short version:
+- full extension-host smoke testing still needs a real pi installation
+- live intercom broker transport is optional
+- Codex support is partial
+- `runner=claude-code-agent` rejects real `fork`
+- teams backend is local-only
+- attention ack/snooze is local extension state
 
-See `KNOWN_LIMITS.md` for the blunt version.
-
-Most important limits:
-- Full extension-host smoke testing still depends on a real pi installation and host runtime.
-- Intercom broker availability is optional; local runtime-backed peers still work without live broker presence.
-- Experimental Codex support is currently strongest on runtime-backed peers; subagents and teams backend APIs and LLM-callable tools can also thread driver selection, but slash-command/visual extension UX still does not expose subagent/team driver selection.
-- `runner=claude-code-agent` does not support real `fork` semantics.
-- Attention ack/snooze persistence is local extension state, not a shared cross-session protocol.
-- Teams backend is local to this repo, not a broader external team product integration.
-
-## Bottom line
-
-This repo is in a good state to share with other developers as a **local MVP with honest limits**.
+See `KNOWN_LIMITS.md` for the detailed version.
