@@ -1,81 +1,134 @@
 # pi-ca-leash
 
-Runtime-first Claude Code integration for pi.
+Harness-aware Claude Code and Codex CLI extension for pi.
 
-This repo treats Claude Code as a long-lived local runtime, not as a stateless model provider. It builds a small local MVP around that runtime: named peers, retained subagent-style jobs, persistent teammates, and pi extension wiring.
+Claude Code and Codex CLI are more than model endpoints. They are coding harnesses with their own tool loops, session semantics, and increasingly harness-optimized models. `pi-ca-leash` treats them that way.
 
-## Status
+Pi stays in the brain seat — like a human coordinating multiple coding agents. It can start long-lived workers, hand them scoped tasks, wait for results, inspect what they did, and decide what happens next.
 
-Working local MVP:
-- Claude Code runtime package
-- optional experimental Codex CLI runtime driver
-- named peer bridge with optional live intercom transport
-- local subagent backend
-- local teams backend
-- pi extension with `/peer`, peer dashboard, attention state, and LLM-callable tools
+Claude is the default and most complete path today. Codex works too, but is still experimental and not parity-complete.
 
-Not claimed:
+## What it adds
+
+After installation, pi gets:
+- named long-lived peers with `/peer start`, `/peer ask`, `/peer send`, `/peer history`, and `/peer stop`
+- a peer dashboard plus local attention state
+- LLM-callable peer tools such as `peer_start`, `peer_ask`, `peer_send`, `peer_history`, and `runtime_models`
+- optional local subagent-style runs and local persistent teammates behind advanced commands/tools
+- optional live intercom transport when the broker is reachable
+
+What this package does **not** claim:
 - no real upstream `pi-subagents` integration
 - no external `pi-teams` integration
 - no real Claude fork/session-tree semantics
 - no host-independent full pi extension smoke test
 
-## Install
+## Example session
 
-Requirements:
-- Node.js 18 or newer
-- npm
-- Claude Code configured for Claude-backed execution
-- a real pi installation to load the extension
+Fictional but representative flow:
 
-Optional:
-- `codex` on `PATH` for experimental Codex-backed runtime checks
+```text
+You: /peer dashboard
 
-Install and verify from the repo root:
+You: Start a planner peer to understand the auth flow and propose the safest implementation plan.
 
-```bash
-npm install
-npm test
-npm run build
+You: Start an implementer peer too, but keep it waiting for my approved plan before editing anything.
+
+Pi/main agent:
+- uses peer tools to start both workers
+- keeps control of the conversation
+- receives planner output automatically when it is ready
+- decides what plan to approve
+
+Sample peer state:
+- planner      idle      summarized auth flow and proposed scoped plan
+- implementer  waiting   ready for approved implementation handoff
+
+You: Send the approved plan to the implementer. Keep changes scoped. Report files changed, commands run, tests, and residual risk.
+
+Pi/main agent:
+- inspects the implementer result
+- asks follow-up questions if needed
+- gives the final answer to the user
 ```
 
-`npm install` runs the workspace build through `prepare`, so local and git-based installs have package `dist/` files available.
+That is core idea: pi is not replaced by child agents. Pi orchestrates them.
 
-Install into pi from npm:
+Once peer mode is active, you can often ask for this in natural language instead of manually driving every peer command.
+
+## Install
+
+For most users, if pi already works on your machine and `pi install` works, you do not need to think about Node directly. `pi install npm:pi-ca-leash` is usually enough.
+
+Requirements for normal use:
+- a working pi installation
+- at least one configured runtime:
+  - Claude Code configured for Claude-backed execution, or
+  - `codex` on `PATH` for experimental Codex-backed runtime checks
+
+Requirements for local development or source installs:
+- Node.js 18 or newer
+- npm
+
+Install from npm:
 
 ```bash
 pi install npm:pi-ca-leash
 ```
 
-Pin an explicit npm version when needed:
+Pin an explicit version when needed:
 
 ```bash
 pi install npm:pi-ca-leash@0.10.0
 ```
 
-Install into pi from a pinned git release:
+Install from a pinned git release:
 
 ```bash
 pi install git:github.com/durandom/pi-ca-leash@v0.10.0
 ```
 
-Install into pi from this checkout:
+Try this checkout locally:
 
 ```bash
 npm install
+npm test
 npm run build
 pi install /absolute/path/to/pi-ca-leash
 ```
 
-Start pi with Codex as the default runtime driver for new peers:
+`npm install` runs the workspace build through `prepare`, so local development and git-based installs have package `dist/` files available.
+
+Use Codex as the default runtime driver for newly started peers:
 
 ```bash
 PI_CLAUDE_RUNTIME_DRIVER=codex-cli pi
 ```
 
-Existing persisted peers keep their recorded driver.
+Persisted peers keep their recorded driver.
 
-## Use
+## Try this first
+
+Inside pi:
+
+```text
+/peer about
+/peer init
+/peer start reviewer | Review this repo briefly and report one concrete risk.
+# keep working or wait; completion relays automatically
+/peer ask reviewer | Reply with exactly: peer-ok
+/peer dashboard advanced
+```
+
+If you want Codex-backed peers, inspect the bundled Codex catalog first:
+
+```text
+/peer models codex-cli
+```
+
+## How it works
+
+After peer mode is active, the main agent can use the peer tools directly, and you can usually steer it in plain language.
 
 Mental model:
 - the main agent stays in charge; peers are delegated workers, not replacements for the orchestrator
@@ -106,19 +159,6 @@ Primary slash-command surface:
 /peer interrupt <name>
 /peer stop <name>
 /peer stop --all --confirm
-```
-
-Quick check inside pi:
-
-```text
-/peer about
-/peer init
-/peer models codex-cli
-/peer start reviewer | Review this repo briefly and report one concrete risk.
-# keep working or wait; completion relays automatically
-/peer ask reviewer | Reply with exactly: peer-ok
-/peer list
-/peer dashboard advanced
 ```
 
 LLM-callable tools:
@@ -174,7 +214,7 @@ The extension keeps peer output quiet by default:
 
 Runtime driver notes:
 - `claude-sdk` is the default and most complete path
-- `codex-cli` is experimental
+- `codex-cli` is supported, but still experimental and not parity-complete
 - `PI_CLAUDE_RUNTIME_DRIVER=codex-cli` changes the default for newly started peers
 - `/peer models` and LLM-callable `runtime_models` show a short recommended model list by default, including advisory use cases
 - `/peer models ... all` and `runtime_models(verbose: true)` expose the full bundled Lanista-derived model catalog

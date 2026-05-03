@@ -7,6 +7,7 @@ All notable changes to this repository should be recorded here.
 ### Changed
 - Root package is now publishable as a single npm package that bundles the internal runtime, bridge, subagents, and teams workspaces while keeping their build output inside the shipped tarball.
 - Root install/build hooks now use `prepare` plus `prepack` instead of consumer-side `postinstall` rebuilds.
+- README and package metadata now describe the package as a harness-aware Claude Code and Codex CLI extension, while still calling out Codex support as experimental.
 
 ### Fixed
 - `peer_interrupt` now reports whether an interrupt signal was delivered, the runtime reason, resulting peer state, and whether follow-up input can be sent immediately.
