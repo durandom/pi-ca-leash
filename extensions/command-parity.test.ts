@@ -164,6 +164,40 @@ test("/peer is the only public slash command by default", async () => {
   try {
     assert.equal(harness.commands.has("peer"), true);
     assert.equal([...harness.commands.keys()].some((name) => name.startsWith("claude-")), false);
+    assert.equal(harness.widgets.has("peer-dashboard"), false);
+    assert.equal(harness.statusUpdates.length, 0);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("/peer help stays passive while /peer init activates and shows guide", async () => {
+  const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
+  try {
+    const helpMessages = await harness.run("peer", "help");
+    assert.match(latestBody(helpMessages), /\/peer init/);
+    assert.equal(harness.widgets.has("peer-dashboard"), false);
+
+    const initMessages = await harness.run("peer", "init");
+    assert.match(latestBody(initMessages), /How to work with pi-ca-leash:/);
+    assert.match(latestBody(initMessages), /main agent as the orchestrator/);
+    assert.match(latestBody(initMessages), /\/peer models or runtime_models/);
+    assert.equal(harness.widgets.has("peer-dashboard"), true);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("first actionable /peer command activates and shows guide once", async () => {
+  const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
+  try {
+    const firstMessages = await harness.run("peer", "models codex-cli");
+    assert.match(String(firstMessages.at(0)?.message?.content ?? ""), /How to work with pi-ca-leash:/);
+    assert.match(latestBody(firstMessages), /codex-cli models/);
+    assert.equal(harness.widgets.has("peer-dashboard"), true);
+
+    const nextMessages = await harness.run("peer", "list");
+    assert.doesNotMatch(nextMessages.map((entry) => String(entry.message.content ?? "")).join("\n"), /How to work with pi-ca-leash:/);
   } finally {
     await harness.close();
   }

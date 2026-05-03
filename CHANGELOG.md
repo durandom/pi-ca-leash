@@ -5,6 +5,8 @@ All notable changes to this repository should be recorded here.
 ## Unreleased
 
 ### Changed
+- Extension startup is now lazy: loading registers commands/tools only, while `/peer init` or the first actionable `/peer` command starts the widget/background workflow and shows the operator guide.
+- Moved core extension prompt/guidance text into editable files under `extensions/prompts/`.
 - Added a bundled Lanista-derived runtime model catalog for `claude-sdk` and `codex-cli`, exposed through `runtime_models` and `/peer models`.
 - `/peer start` can now include explicit driver and model fields in pipe syntax.
 - Runtime tool guidance now points agents to `runtime_models` before choosing non-default model ids.

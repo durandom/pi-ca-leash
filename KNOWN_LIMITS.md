@@ -21,8 +21,8 @@ This file is intentionally blunt.
    - Bridge peers can carry driver identity, including `driver: "codex-cli"`.
    - Extension startup can select Codex as the default driver for new peers via `PI_CLAUDE_RUNTIME_DRIVER=codex-cli`.
    - Per-peer driver override exists on the LLM-callable `peer_start` tool.
-   - Public slash-command peer docs stay driver-agnostic; treat Codex selection as experimental even where compatibility paths can thread it.
-   - Subagents and teams backend APIs, demo CLIs, and LLM-callable tools can thread driver selection, but slash-command/visual extension UX still does not expose subagent/team driver selection.
+   - Public `/peer start` slash-command docs can thread driver and model selection, but treat Codex selection as experimental.
+   - Subagents and teams backend APIs, demo CLIs, and LLM-callable tools can thread driver selection, but public slash-command UX still does not expose subagent/team driver selection.
    - The bundled model catalog is advisory and generated from Lanista snapshots; it does not prove that the local CLI or account can use every listed model.
    - Workspace tests do not require a real `codex` binary, but local smoke validation can use a real one.
    - Context-window percentage is currently Claude SDK-derived only; Codex-backed peers show no `ctx` value unless a trustworthy context window can be derived later.
@@ -38,6 +38,7 @@ This file is intentionally blunt.
 6. **Live intercom broker transport is optional.**
    - If the broker is unreachable, local runtime-backed peers still work.
    - Live presence/messaging through the broker is unavailable until reconnect.
+   - The extension now waits until `/peer init`, another actionable `/peer` command, or an LLM-callable runtime tool before starting background broker checks.
 
 7. **Cross-process resurrection is partial, not magical.**
    - Persisted state survives.

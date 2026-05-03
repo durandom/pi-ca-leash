@@ -20,6 +20,27 @@ import { formatPeerHistoryPage } from "./peer-history.js";
 import { buildPeerActivityRow, getPeerFirstHealth, isPeerVisibleInWidget, type PeerActivityRow } from "./peer-ux.js";
 import { parseRuntimeDriverName, resolveExtensionRuntimeDriverConfig } from "./runtime-driver.js";
 import { describeModelSelection, modelCatalogsForDriver, type RuntimeDriverModelCatalog } from "./model-catalog.js";
+import {
+  PEER_ASK_TOOL_PROMPT,
+  PEER_BRIDGE_APPEND_SYSTEM_PROMPT,
+  PEER_HISTORY_TOOL_PROMPT,
+  PEER_INIT_GUIDE,
+  PEER_INTERRUPT_TOOL_PROMPT,
+  PEER_LIST_TOOL_PROMPT,
+  PEER_NO_BABYSITTING_GUIDANCE,
+  PEER_SEND_TOOL_PROMPT,
+  PEER_START_TOOL_PROMPT,
+  PEER_STOP_TOOL_PROMPT,
+  RUNTIME_MODELS_TOOL_PROMPT,
+  SUBAGENT_LIST_TOOL_PROMPT,
+  SUBAGENT_RUN_TOOL_PROMPT,
+  SUBAGENT_STATUS_TOOL_PROMPT,
+  TEAM_LIST_TOOL_PROMPT,
+  TEAM_MESSAGE_TOOL_PROMPT,
+  TEAM_SPAWN_TOOL_PROMPT,
+  TEAM_STOP_TOOL_PROMPT,
+  TEAM_TASK_TOOL_PROMPT,
+} from "./prompts.js";
 import { parseSubagentRunToolInput, parseTeamSpawnToolInput } from "./tool-inputs.js";
 import { parsePeerStartCommandInput, parseSubagentRunCommandInput, parseTeamSpawnCommandInput } from "./command-drivers.js";
 import { buildSubagentRunRequest, buildTeamSpawnRequest } from "./backend-tool-actions.js";
@@ -49,21 +70,6 @@ const STATE_DIR_NAME = ".pi-ca-leash";
 const BACKGROUND_POLL_INTERVAL_MS = 5_000;
 const BACKGROUND_REFRESH_MIN_INTERVAL_MS = 3_000;
 const DEFAULT_SNOOZE_MINUTES = 15;
-const PEER_BRIDGE_APPEND_SYSTEM_PROMPT = [
-  "You are a long-lived Claude worker reached through intercom-style messages.",
-  "Treat new messages as continuation of same session, not fresh bootstrap.",
-  "For asks and replies, answer concisely and directly.",
-  "When you finish handling one inbound message, end in a clean idle state.",
-].join(" ");
-
-const PEER_NO_BABYSITTING_GUIDANCE = [
-  "How to work with this peer:",
-  "- Treat it as an async worker/subagent.",
-  "- Do not poll it with peer_list, peer_history, or repeated peer_ask status checks.",
-  "- Continue your own work or wait passively.",
-  "- The peer will send a follow-up into the main context when it is done, blocked, or failed.",
-  "- Only contact the peer if the user explicitly asks, or if the peer asks for input.",
-].join("\n");
 
 interface DashboardSnapshot {
   sessions: number;
@@ -140,6 +146,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   let attentionLedger: AttentionLedger = await readAttentionLedger(attentionLedgerPath);
   let persistedAttentionLedger = serializeAttentionLedger(attentionLedger);
   const peerRelaySnapshots = new Map<string, PeerRelaySnapshot>();
+  let peerModeActive = false;
+  let peerGuideShown = false;
+  let runtimeDriverFallbackShown = false;
 
   const showAdvancedCommands = advancedCommandsEnabled();
   const showLegacyCommands = legacyCommandsEnabled();
@@ -242,6 +251,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   }
 
   async function refreshVisibleDashboard(lastEvent?: string): Promise<void> {
+    if (!peerModeActive) {
+      return;
+    }
     if (!dashboardContextRef) {
       return;
     }
@@ -406,10 +418,39 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     backgroundMonitorTimer.unref?.();
   }
 
-  await ensureIntercomTransportHealthy(false);
   const peerNameCache = new Set((await bridge.listPeers()).map((peer) => peer.name));
-  await seedPeerRelaySnapshots();
-  startBackgroundMonitor();
+
+  async function activatePeerMode(ctx: ExtensionContext | ExtensionCommandContext, options: { command?: string; showGuide?: boolean; forceGuide?: boolean; reason?: string } = {}): Promise<void> {
+    if (!peerModeActive) {
+      await ensureIntercomTransportHealthy(false);
+      await syncAttentionLedger();
+      await seedPeerRelaySnapshots();
+      startBackgroundMonitor();
+      peerModeActive = true;
+      dashboardContextRef = ctx;
+      if (options.reason) {
+        recordDashboardEvent(dashboardState, options.reason);
+      }
+    }
+    if (options.showGuide && (options.forceGuide || !peerGuideShown)) {
+      peerGuideShown = true;
+      sendCommandMessage(pi, {
+        level: "info",
+        command: options.command,
+        title: "How to work with pi-ca-leash",
+        body: PEER_INIT_GUIDE,
+      });
+    }
+    if (runtimeDriverConfig.note && !runtimeDriverFallbackShown) {
+      runtimeDriverFallbackShown = true;
+      sendCommandMessage(pi, {
+        level: "warning",
+        command: options.command,
+        title: "Runtime driver config fallback",
+        body: runtimeDriverConfig.note,
+      });
+    }
+  }
 
   pi.registerMessageRenderer("peer-command-result", (message, { expanded }, theme) => {
     const details = (message.details ?? {}) as Partial<CommandMessageDetails>;
@@ -442,12 +483,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "runtime_models",
     label: "Runtime Models",
     description: "List the bundled Lanista-derived model catalog for Claude SDK and Codex CLI runtime drivers.",
-    promptSnippet: "Inspect available model ids for claude-sdk and codex-cli before passing a model override to peer_start, peer_ask, subagent_run, or team_spawn.",
-    promptGuidelines: [
-      "Use `runtime_models` before choosing a non-default model.",
-      "Use `driver` to narrow results to `claude-sdk` or `codex-cli`.",
-      "Catalog entries are advisory; provider and CLI entitlements can drift, so unknown model ids are passed through to the runtime.",
-    ],
+    promptSnippet: RUNTIME_MODELS_TOOL_PROMPT.snippet,
+    promptGuidelines: RUNTIME_MODELS_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -476,14 +513,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "peer_start",
     label: "Start Peer",
     description: "Start a long-lived runtime-backed peer from a prompt, optionally with an explicit name, driver, model, and working directory.",
-    promptSnippet: "Start a long-lived runtime-backed peer for delegated work. Returns peer name, state, session id, driver, model, cwd, and latest visible peer reply when available.",
-    promptGuidelines: [
-      "Use `peer_start` when you want a reusable long-lived peer instead of solving the task in the current turn.",
-      "Pass `name` only when you need a stable explicit peer name; otherwise let the tool auto-name from prompt.",
-      "Pass `driver` when you need to force `claude-sdk` or `codex-cli` for this peer instead of using the extension default.",
-      "Call `runtime_models` first when you need the supported model ids for a driver.",
-      "Pass `model` and `cwd` when you need a specific model and working directory.",
-    ],
+    promptSnippet: PEER_START_TOOL_PROMPT.snippet,
+    promptGuidelines: PEER_START_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -497,6 +528,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "peer_start", reason: "Peer mode activated" });
       const input = params as { prompt?: unknown; name?: unknown; driver?: unknown; model?: unknown; cwd?: unknown };
       const prompt = String(input.prompt ?? "").trim();
       const explicitName = typeof input.name === "string" ? input.name.trim() : "";
@@ -565,16 +597,15 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "peer_list",
     label: "List Peers",
     description: "List known runtime-backed peers with their current state and latest activity summary.",
-    promptSnippet: "List current long-lived runtime-backed peers and their summarized activity.",
-    promptGuidelines: [
-      "Use `peer_list` before asking or stopping a peer when you need current names and states.",
-    ],
+    promptSnippet: PEER_LIST_TOOL_PROMPT.snippet,
+    promptGuidelines: PEER_LIST_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {},
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "peer_list", reason: "Peer mode activated" });
       const data = await collectDashboardData(runtime, bridge, subagents, teams, dashboardState, attentionLedger);
       syncNameCache(peerNameCache, data.peers.map((peer) => peer.name));
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peers · ${data.peers.length}`, data);
@@ -605,12 +636,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "peer_history",
     label: "Peer History",
     description: "Scroll through a peer transcript so the main agent can inspect prior visible messages and tool activity.",
-    promptSnippet: "Read older peer transcript history when you need to scroll back instead of asking the peer to repeat itself.",
-    promptGuidelines: [
-      "Use `peer_history` when you need to inspect prior peer transcript context rather than sending a new ask.",
-      "Use returned `previousCursor` and `nextCursor` values to scroll backward or forward through longer history.",
-      "Cursor and limit operate on visible history entries, not raw hidden transcript events.",
-    ],
+    promptSnippet: PEER_HISTORY_TOOL_PROMPT.snippet,
+    promptGuidelines: PEER_HISTORY_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -622,6 +649,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "peer_history", reason: "Peer mode activated" });
       const input = params as { name?: unknown; cursor?: unknown; limit?: unknown };
       const name = String(input.name ?? "").trim();
       const cursor = input.cursor == null ? undefined : Number(input.cursor);
@@ -686,13 +714,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "peer_ask",
     label: "Ask Peer",
     description: "Send a message to an existing peer and wait for its visible reply. Optionally switch the peer to a different model.",
-    promptSnippet: "Ask an existing peer for a status update, follow-up, or delegated result. Optionally pass model to switch the peer model persistently.",
-    promptGuidelines: [
-      "Use `peer_ask` only with an existing peer name.",
-      "Prefer concise direct asks because the peer reply is returned into the current turn.",
-      "Call `runtime_models` first when you need the supported model ids for a driver.",
-      "Pass `model` when you want this peer to switch models for this and future asks.",
-    ],
+    promptSnippet: PEER_ASK_TOOL_PROMPT.snippet,
+    promptGuidelines: PEER_ASK_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -704,6 +727,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "peer_ask", reason: "Peer mode activated" });
       const input = params as { name?: unknown; message?: unknown; model?: unknown };
       const name = String(input.name ?? "").trim();
       const message = String(input.message ?? "").trim();
@@ -756,13 +780,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "peer_send",
     label: "Send to Peer",
     description: "Send a fire-and-forget message to an idle peer. The peer completion will arrive later as an automated follow-up.",
-    promptSnippet: "Send input to a peer without waiting for the reply. Use this when the peer will report back asynchronously.",
-    promptGuidelines: [
-      "Use `peer_send` instead of `peer_ask` when you do not need an immediate reply.",
-      "Do not use it to poll for status; wait for automated peer updates.",
-      "If the peer is busy, wait for its automated update before sending more input.",
-      "Call `runtime_models` first when you need the supported model ids for a driver.",
-    ],
+    promptSnippet: PEER_SEND_TOOL_PROMPT.snippet,
+    promptGuidelines: PEER_SEND_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -774,6 +793,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "peer_send", reason: "Peer mode activated" });
       const input = params as { name?: unknown; message?: unknown; model?: unknown };
       const name = String(input.name ?? "").trim();
       const message = String(input.message ?? "").trim();
@@ -822,11 +842,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "peer_interrupt",
     label: "Interrupt Peer",
     description: "Gracefully interrupt a running peer without forgetting its registry entry.",
-    promptSnippet: "Interrupt a peer that is busy or stuck. Prefer this before stopping/killing a peer.",
-    promptGuidelines: [
-      "Use `peer_interrupt` when a peer is stuck, doing unsafe broad work, or should stop its current turn.",
-      "After interrupting, wait for the peer state update before sending new input.",
-    ],
+    promptSnippet: PEER_INTERRUPT_TOOL_PROMPT.snippet,
+    promptGuidelines: PEER_INTERRUPT_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -836,6 +853,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "peer_interrupt", reason: "Peer mode activated" });
       const input = params as { name?: unknown };
       const name = String(input.name ?? "").trim();
       if (!name) {
@@ -866,11 +884,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "peer_stop",
     label: "Stop Peer",
     description: "Stop a named peer, or stop all peers when explicitly confirmed.",
-    promptSnippet: "Stop a named peer when its work is done or you want to shut it down. Can also stop all peers with explicit confirmation.",
-    promptGuidelines: [
-      "Use `peer_stop` only after confirming the peer name, preferably via `peer_list`.",
-      "For bulk stop, pass `all: true` and `confirmAll: true`.",
-    ],
+    promptSnippet: PEER_STOP_TOOL_PROMPT.snippet,
+    promptGuidelines: PEER_STOP_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -881,6 +896,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "peer_stop", reason: "Peer mode activated" });
       const input = params as { name?: unknown; all?: unknown; confirmAll?: unknown };
       const name = String(input.name ?? "").trim();
       const stopAll = input.all === true;
@@ -959,13 +975,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "subagent_run",
     label: "Run Subagent",
     description: "Start a runtime-backed subagent run and return its status or result.",
-    promptSnippet: "Run a delegated subagent task through the local backend. Supports driver, model, cwd, and optional async execution.",
-    promptGuidelines: [
-      "Use `subagent_run` when you need a bounded delegated run instead of a reusable peer.",
-      "Pass `driver` to force `claude-sdk` or `codex-cli` for this run instead of using the extension default.",
-      "Call `runtime_models` first when you need the supported model ids for a driver.",
-      "Pass `async: true` when you want to launch a background run and inspect it later with `subagent_status` or `subagent_list`.",
-    ],
+    promptSnippet: SUBAGENT_RUN_TOOL_PROMPT.snippet,
+    promptGuidelines: SUBAGENT_RUN_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -981,6 +992,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "subagent_run", reason: "Peer mode activated" });
       const input = parseSubagentRunToolInput(params as { task?: unknown; name?: unknown; prompt?: unknown; driver?: unknown; model?: unknown; cwd?: unknown; async?: unknown });
       const effectiveDriver = input.driver ?? runtimeDriverConfig.defaultDriver;
       const modelNote = describeModelSelection(effectiveDriver, input.model);
@@ -1021,16 +1033,15 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "subagent_list",
     label: "List Subagent Runs",
     description: "List known local subagent runs with driver and state.",
-    promptSnippet: "List retained local subagent runs when you need run ids, drivers, states, or agent names.",
-    promptGuidelines: [
-      "Use `subagent_list` before `subagent_status` when you need a current run id.",
-    ],
+    promptSnippet: SUBAGENT_LIST_TOOL_PROMPT.snippet,
+    promptGuidelines: SUBAGENT_LIST_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {},
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "subagent_list", reason: "Peer mode activated" });
       const runs = await subagents.listRuns();
       const attentionViews = listAttentionViews(attentionLedger, runs, Date.now());
       const attentionByRunId = new Map(attentionViews.map((view) => [view.run.runId, describeAttentionState(view, Date.now())]));
@@ -1064,10 +1075,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "subagent_status",
     label: "Subagent Status",
     description: "Show status for one local subagent run.",
-    promptSnippet: "Inspect one retained local subagent run by run id.",
-    promptGuidelines: [
-      "Use `subagent_status` when you already have a run id and need driver, state, summary, or attention note.",
-    ],
+    promptSnippet: SUBAGENT_STATUS_TOOL_PROMPT.snippet,
+    promptGuidelines: SUBAGENT_STATUS_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -1077,6 +1086,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "subagent_status", reason: "Peer mode activated" });
       const input = params as { runId?: unknown };
       const runId = String(input.runId ?? "").trim();
       if (!runId) {
@@ -1123,12 +1133,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "team_spawn",
     label: "Spawn Teammate",
     description: "Spawn a persistent local teammate backed by the runtime bridge.",
-    promptSnippet: "Spawn a persistent teammate when you want a named worker you can task or message repeatedly.",
-    promptGuidelines: [
-      "Use `team_spawn` for a persistent named worker, not for one-off bounded work.",
-      "Pass `driver` to force `claude-sdk` or `codex-cli` for this teammate instead of using the extension default.",
-      "Call `runtime_models` first when you need the supported model ids for a driver.",
-    ],
+    promptSnippet: TEAM_SPAWN_TOOL_PROMPT.snippet,
+    promptGuidelines: TEAM_SPAWN_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -1142,6 +1148,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "team_spawn", reason: "Peer mode activated" });
       const input = parseTeamSpawnToolInput(params as { name?: unknown; prompt?: unknown; driver?: unknown; model?: unknown; cwd?: unknown });
       const effectiveDriver = input.driver ?? runtimeDriverConfig.defaultDriver;
       const modelNote = describeModelSelection(effectiveDriver, input.model);
@@ -1171,10 +1178,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "team_task",
     label: "Assign Team Task",
     description: "Assign a task to a persistent teammate and wait for the reply.",
-    promptSnippet: "Assign a task to an existing teammate when you want retained worker state across tasks.",
-    promptGuidelines: [
-      "Use `team_task` after `team_spawn` when the teammate should retain context across tasks.",
-    ],
+    promptSnippet: TEAM_TASK_TOOL_PROMPT.snippet,
+    promptGuidelines: TEAM_TASK_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -1186,6 +1191,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "team_task", reason: "Peer mode activated" });
       const input = params as { name?: unknown; title?: unknown; details?: unknown };
       const name = String(input.name ?? "").trim();
       const title = String(input.title ?? "").trim();
@@ -1216,10 +1222,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "team_message",
     label: "Message Teammate",
     description: "Send a direct message to a persistent teammate and wait for the reply.",
-    promptSnippet: "Message an existing teammate when you need a follow-up without creating a new task record.",
-    promptGuidelines: [
-      "Use `team_message` for direct teammate chat after the teammate already exists.",
-    ],
+    promptSnippet: TEAM_MESSAGE_TOOL_PROMPT.snippet,
+    promptGuidelines: TEAM_MESSAGE_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -1230,6 +1234,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "team_message", reason: "Peer mode activated" });
       const input = params as { name?: unknown; message?: unknown };
       const name = String(input.name ?? "").trim();
       const message = String(input.message ?? "").trim();
@@ -1257,16 +1262,15 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "team_list",
     label: "List Team State",
     description: "List retained teammates and task records.",
-    promptSnippet: "List teammates and team tasks when you need the current retained local team state.",
-    promptGuidelines: [
-      "Use `team_list` before assigning or stopping when you need current teammate names and states.",
-    ],
+    promptSnippet: TEAM_LIST_TOOL_PROMPT.snippet,
+    promptGuidelines: TEAM_LIST_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {},
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "team_list", reason: "Peer mode activated" });
       const teammates = await teams.listTeammates();
       const tasks = await teams.listTasks();
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Team/Todo · ${teammates.length}/${tasks.length}`);
@@ -1290,10 +1294,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     name: "team_stop",
     label: "Stop Teammate",
     description: "Stop a persistent teammate.",
-    promptSnippet: "Stop a named teammate when its work is done or you want to tear down its retained session.",
-    promptGuidelines: [
-      "Use `team_stop` after checking current teammates with `team_list` when you need exact names.",
-    ],
+    promptSnippet: TEAM_STOP_TOOL_PROMPT.snippet,
+    promptGuidelines: TEAM_STOP_TOOL_PROMPT.guidelines,
     parameters: {
       type: "object",
       properties: {
@@ -1303,6 +1305,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       additionalProperties: false,
     } as any,
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      await activatePeerMode(ctx, { command: "team_stop", reason: "Peer mode activated" });
       const input = params as { name?: unknown };
       const name = String(input.name ?? "").trim();
       if (!name) {
@@ -1328,18 +1331,10 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   });
 
   pi.on("session_start", async (event, ctx) => {
-    await ensureIntercomTransportHealthy(false);
-    await syncAttentionLedger();
-    await seedPeerRelaySnapshots();
-    startBackgroundMonitor();
-    await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `${startupSummary} (${event.reason})`);
-    ctx.ui.notify(`${startupSummary} (${event.reason})`, "info");
-    if (runtimeDriverConfig.note) {
-      sendCommandMessage(pi, {
-        level: "warning",
-        title: "Runtime driver config fallback",
-        body: runtimeDriverConfig.note,
-      });
+    if (peerModeActive) {
+      await activatePeerMode(ctx, { reason: `${startupSummary} (${event.reason})` });
+      await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger);
+      ctx.ui.notify(`${startupSummary} (${event.reason})`, "info");
     }
   });
 
@@ -1347,6 +1342,9 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     dashboardContextRef = undefined;
     lastWidgetSignature = undefined;
     peerRelaySnapshots.clear();
+    peerModeActive = false;
+    peerGuideShown = false;
+    runtimeDriverFallbackShown = false;
     if (backgroundMonitorTimer) {
       clearInterval(backgroundMonitorTimer);
       backgroundMonitorTimer = undefined;
@@ -1360,6 +1358,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   });
 
   async function handleDashboardCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
+    await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
     const advanced = args.trim().toLowerCase() === "advanced";
     await syncAttentionLedger();
     const data = await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger);
@@ -1389,6 +1388,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       ].join("\n"));
       return;
     }
+    await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
 
     const existingNames = new Set((await bridge.listPeers()).map((peer) => peer.name));
     const name = parsed.name ?? derivePeerName(parsed.prompt, existingNames);
@@ -1435,6 +1435,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   }
 
   async function handlePeerListCommand(ctx: ExtensionCommandContext, command: string): Promise<void> {
+    await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
     const data = await collectDashboardData(runtime, bridge, subagents, teams, dashboardState, attentionLedger);
     syncNameCache(peerNameCache, data.peers.map((peer) => peer.name));
     await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peers · ${data.peers.length}`, data);
@@ -1447,6 +1448,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   }
 
   async function handlePeerModelsCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
+    await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
     const rawDriver = args.trim();
     const driver = rawDriver ? parseRuntimeDriverName(rawDriver) : undefined;
     if (rawDriver && !driver) {
@@ -1471,6 +1473,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       ].join("\n"));
       return;
     }
+    await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
 
     sendCommandMessage(pi, {
       level: "info",
@@ -1503,6 +1506,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       ].join("\n"));
       return;
     }
+    await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
 
     sendCommandMessage(pi, {
       level: "info",
@@ -1549,6 +1553,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     if (limit != null && (!Number.isFinite(limit) || limit <= 0)) {
       throw new Error("limit must be a positive number");
     }
+    await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
 
     const target = await resolvePeerHistoryTarget(name);
     if (!target) {
@@ -1586,6 +1591,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       ].join("\n"));
       return;
     }
+    await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
 
     const peer = await bridge.interrupt(name);
     peerNameCache.add(name);
@@ -1599,6 +1605,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   }
 
   async function handlePeerStopCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
+    await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
     const trimmed = args.trim();
     const tokens = trimmed.split(/\s+/).filter(Boolean);
     const stopAll = tokens.includes("--all");
@@ -1665,6 +1672,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   function showPeerUsage(command: string): void {
     showUsage(pi, command, [
       `/${command} or /${command} dashboard`,
+      `/${command} init`,
       `/${command} dashboard advanced`,
       `/${command} start <prompt>`,
       `/${command} start <prompt> | <driver> | <model>`,
@@ -1681,9 +1689,10 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     ].join("\n"));
   }
 
-  registerExtensionCommand(pi, "peer", "Peer dashboard and controls. Args: [dashboard|start|ask|send|list|models|history|interrupt|stop] ...", async (args, ctx) => {
+  registerExtensionCommand(pi, "peer", "Peer dashboard and controls. Args: [init|dashboard|start|ask|send|list|models|history|interrupt|stop] ...", async (args, ctx) => {
     const trimmed = args.trim();
     if (!trimmed) {
+      await activatePeerMode(ctx, { command: "peer", showGuide: true, reason: "Peer mode activated" });
       await handleDashboardCommand("", ctx, "peer");
       return;
     }
@@ -1693,31 +1702,44 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     const rest = restParts.join(" ").trim();
 
     switch (subcommand) {
+      case "init":
+        await activatePeerMode(ctx, { command: "peer init", showGuide: true, forceGuide: true, reason: "Peer mode activated" });
+        await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger);
+        return;
       case "dashboard":
+        await activatePeerMode(ctx, { command: "peer dashboard", showGuide: true, reason: "Peer mode activated" });
         await handleDashboardCommand(rest, ctx, "peer dashboard");
         return;
       case "start":
+        await activatePeerMode(ctx, { command: "peer start", showGuide: true, reason: "Peer mode activated" });
         await handlePeerStartCommand(rest, ctx, "peer start");
         return;
       case "ask":
+        await activatePeerMode(ctx, { command: "peer ask", showGuide: true, reason: "Peer mode activated" });
         await handlePeerAskCommand(rest, ctx, "peer ask");
         return;
       case "send":
+        await activatePeerMode(ctx, { command: "peer send", showGuide: true, reason: "Peer mode activated" });
         await handlePeerSendCommand(rest, ctx, "peer send");
         return;
       case "list":
+        await activatePeerMode(ctx, { command: "peer list", showGuide: true, reason: "Peer mode activated" });
         await handlePeerListCommand(ctx, "peer list");
         return;
       case "models":
+        await activatePeerMode(ctx, { command: "peer models", showGuide: true, reason: "Peer mode activated" });
         await handlePeerModelsCommand(rest, ctx, "peer models");
         return;
       case "history":
+        await activatePeerMode(ctx, { command: "peer history", showGuide: true, reason: "Peer mode activated" });
         await handlePeerHistoryCommand(rest, ctx, "peer history");
         return;
       case "interrupt":
+        await activatePeerMode(ctx, { command: "peer interrupt", showGuide: true, reason: "Peer mode activated" });
         await handlePeerInterruptCommand(rest, ctx, "peer interrupt");
         return;
       case "stop":
+        await activatePeerMode(ctx, { command: "peer stop", showGuide: true, reason: "Peer mode activated" });
         await handlePeerStopCommand(rest, ctx, "peer stop");
         return;
       case "help":
@@ -2234,7 +2256,7 @@ function completePeerCommand(prefix: string, names: Set<string>): AutocompleteIt
   const trimmedStart = prefix.trimStart();
   const [subcommand = "", ...restParts] = trimmedStart.split(/\s+/);
   const endsWithSpace = /\s$/.test(trimmedStart);
-  const subcommands = ["dashboard", "start", "ask", "send", "list", "models", "history", "interrupt", "stop", "help"];
+  const subcommands = ["init", "dashboard", "start", "ask", "send", "list", "models", "history", "interrupt", "stop", "help"];
 
   if (!subcommand || (!endsWithSpace && restParts.length === 0)) {
     const matches = subcommands

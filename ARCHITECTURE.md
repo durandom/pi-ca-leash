@@ -103,18 +103,35 @@ Truth:
 Path:
 - `extensions/index.ts`
 - `extensions/model-catalog.ts`
+- `extensions/prompts/`
 
 Responsibility:
 - wire runtime + bridge + backends into a pi extension
 - expose operator commands
 - render peer-first widget/dashboard surfaces
+- stay lazy until `/peer init`, another actionable `/peer` command, or an LLM-callable runtime tool activates the workflow
 - keep retained backend diagnostics behind explicit advanced views
 - monitor live broker transport connectivity
 - surface attention notifications
 - persist local attention ack/snooze state
 - expose a bundled, advisory model catalog for runtime model selection
+- keep editable prompt/guidance text out of the main extension implementation
 
 The extension is where operator UX lives.
+
+Activation model:
+- extension load registers slash commands, tools, and renderers only
+- `session_start` does not create the widget, start the background monitor, or run live intercom checks while inactive
+- `/peer init` activates the workflow and always prints the operator guide
+- the first actionable `/peer` command also activates the workflow and prints the guide once
+- `/peer help` stays passive
+- after activation, the background monitor handles broker connectivity, attention notifications, peer relays, and visible dashboard refreshes
+
+Prompt files:
+- `extensions/prompts/peer-init.md` is the visible operator guide
+- `extensions/prompts/peer-no-babysitting.md` is included in peer start acknowledgments
+- `extensions/prompts/*-tool.md` files provide LLM-callable tool snippets/guidelines
+- `extensions/prompts/peer-bridge-system.md` is appended to runtime-backed peer sessions
 
 ### Model catalog layer
 

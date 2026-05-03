@@ -69,6 +69,7 @@ Primary slash-command surface:
 
 ```text
 /peer
+/peer init
 /peer dashboard
 /peer dashboard advanced
 /peer start <prompt>
@@ -88,8 +89,9 @@ Primary slash-command surface:
 Quick check inside pi:
 
 ```text
-/peer start reviewer | Review this repo briefly and report one concrete risk.
+/peer init
 /peer models codex-cli
+/peer start reviewer | Review this repo briefly and report one concrete risk.
 /peer ask reviewer | Reply with exactly: peer-ok
 /peer list
 /peer dashboard advanced
@@ -135,6 +137,8 @@ PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1 PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1 pi
 
 ## Behavior
 
+The extension is lazy. Loading it registers commands and tools, but it does not start the Peers widget, background monitor, or intercom transport checks immediately. `/peer init` activates the peer workflow and prints the working guide. The first actionable `/peer` command, such as `/peer models`, `/peer dashboard`, `/peer list`, or `/peer start`, also activates it and shows that guide once. `/peer help` stays passive.
+
 Peers are asynchronous workers. The main agent should start a peer, continue useful work, and wait for the automatic peer completion, blocked, or failure relay. It should not poll `peer_list`, `peer_history`, or repeated `peer_ask` just to see whether the peer is done.
 
 The extension keeps peer output quiet by default:
@@ -162,6 +166,7 @@ packages/
   teams-backend/      local persistent teammate backend
 extensions/
   index.ts            pi extension wiring and command/tool surface
+  prompts/            editable prompt and guidance text used by the extension
 ```
 
 Useful docs that should remain current:
