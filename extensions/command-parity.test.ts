@@ -219,8 +219,12 @@ test("compact peer widget renders summary and column labels", async () => {
     const lines = rendered.render(88);
     assert.match(lines[0] ?? "", /Peers 1 peer/);
     assert.match(lines[0] ?? "", /● active|● idle/);
-    assert.match(lines.join("\n"), /peer\s+state\s+(model\s+)?updated\s+activity/);
+    assert.match(lines.join("\n"), /peer\s+state\s+(driver\s+)?(model\s+)?updated\s+activity/);
     assert.match(lines.join("\n"), /reviewer/);
+
+    const narrowLines = rendered.render(40);
+    assert.match(narrowLines.join("\n"), /peer\s+state\s+activity/);
+    assert.doesNotMatch(narrowLines.join("\n"), /updated/);
   } finally {
     await harness.close();
   }

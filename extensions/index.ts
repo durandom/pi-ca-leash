@@ -2229,43 +2229,8 @@ function createDashboardWidget(snapshot: DashboardSnapshot) {
         lines.push(truncateToWidth(theme.fg("dim", "stopped peers in /peer dashboard"), width));
       } else {
         const rows = sortWidgetRows(widgetRows);
-        const nameWidth = Math.min(12, Math.max(4, ...widgetRows.map((row) => row.name.length)));
-        const stateWidth = Math.min(9, Math.max(5, ...widgetRows.map((row) => row.state.length)));
-        const showModel = width >= 52 && widgetRows.some((row) => row.model);
-        const modelWidth = showModel
-          ? Math.min(12, Math.max(4, ...widgetRows.map((row) => compactModel(row.model ?? "").length)))
-          : 0;
-        const showContext = width >= 64 && widgetRows.some(hasPeerContextUsage);
-        const contextWidth = showContext
-          ? Math.max(3, ...widgetRows.map((row) => formatWidgetContextUsage(row).length))
-          : 0;
-
-        const showLastUpdate = width >= 44;
-        const header = [
-          "peer".padEnd(nameWidth),
-          "state".padEnd(stateWidth),
-          showModel ? "model".padEnd(modelWidth) : undefined,
-          showContext ? "ctx".padEnd(contextWidth) : undefined,
-          showLastUpdate ? "updated" : undefined,
-          "activity",
-        ].filter((part): part is string => Boolean(part)).join("  ");
-        lines.push(truncateToWidth(theme.fg("dim", header), width));
-
-        for (const row of rows) {
-          const stateColor = row.state === "busy"
-            ? "success"
-            : ["waiting", "offline"].includes(row.state)
-              ? "warning"
-              : row.state === "error"
-                ? "error"
-                : "text";
-          const modelPart = showModel ? `  ${theme.fg("dim", (row.model ? compactModel(row.model) : "-").padEnd(modelWidth))}` : "";
-          const contextPart = showContext ? `  ${theme.fg(contextUsageColor(row), formatWidgetContextUsage(row).padEnd(contextWidth))}` : "";
-          const updatePart = showLastUpdate ? `  ${theme.fg("dim", formatIsoTime(row.lastUpdateAt))}` : "";
-          const name = truncateToWidth(row.name, nameWidth).padEnd(nameWidth);
-          const line = `${name}  ${theme.fg(stateColor, row.state.padEnd(stateWidth))}${modelPart}${contextPart}${updatePart}  ${row.activity}`;
-          lines.push(truncateToWidth(line, width));
-        }
+        const layout = createWidgetPeerLayout(widgetRows, width);
+        lines.push(...renderWidgetTable(rows, layout, width, theme));
       }
 
       if (snapshot.transportDegraded) {
@@ -2275,6 +2240,61 @@ function createDashboardWidget(snapshot: DashboardSnapshot) {
       return lines;
     },
   });
+}
+
+type WidgetTheme = { fg: (color: string, text: string) => string };
+
+interface WidgetColumn<T> {
+  label: string;
+  width?: number;
+  color?: string | ((row: T) => string);
+  value: (row: T) => string;
+}
+
+function createWidgetPeerLayout(rows: PeerActivityRow[], width: number): Array<WidgetColumn<PeerActivityRow>> {
+  const nameWidth = Math.min(12, Math.max(4, ...rows.map((row) => row.name.length)));
+  const stateWidth = Math.min(9, Math.max(5, ...rows.map((row) => row.state.length)));
+  const showLastUpdate = width >= 44;
+  const showModel = width >= 52 && rows.some((row) => row.model);
+  const modelWidth = showModel
+    ? Math.min(12, Math.max(5, ...rows.map((row) => compactModel(row.model ?? "").length)))
+    : 0;
+  const showContext = width >= 64 && rows.some(hasPeerContextUsage);
+  const contextWidth = showContext
+    ? Math.max(3, ...rows.map((row) => formatWidgetContextUsage(row).length))
+    : 0;
+  const showDriver = width >= 78 && rows.some((row) => row.driver);
+  const driverWidth = showDriver
+    ? Math.min(7, Math.max(6, ...rows.map((row) => compactDriver(row.driver ?? "").length)))
+    : 0;
+
+  return [
+    { label: "peer", width: nameWidth, value: (row) => row.name },
+    { label: "state", width: stateWidth, color: widgetStateColor, value: (row) => row.state },
+    showDriver ? { label: "driver", width: driverWidth, color: "dim", value: (row) => row.driver ? compactDriver(row.driver) : "-" } : undefined,
+    showModel ? { label: "model", width: modelWidth, color: "dim", value: (row) => row.model ? compactModel(row.model) : "-" } : undefined,
+    showContext ? { label: "ctx", width: contextWidth, color: contextUsageColor, value: formatWidgetContextUsage } : undefined,
+    showLastUpdate ? { label: "updated", width: 7, color: "dim", value: (row) => formatIsoTime(row.lastUpdateAt) } : undefined,
+    { label: "activity", value: (row) => row.activity },
+  ].filter((column): column is WidgetColumn<PeerActivityRow> => Boolean(column));
+}
+
+function renderWidgetTable<T>(rows: T[], columns: Array<WidgetColumn<T>>, width: number, theme: WidgetTheme): string[] {
+  return [
+    truncateToWidth(theme.fg("dim", columns.map((column) => formatWidgetCell(column.label, column.width)).join("  ")), width),
+    ...rows.map((row) => truncateToWidth(columns.map((column) => {
+      const color = typeof column.color === "function" ? column.color(row) : column.color;
+      const cell = formatWidgetCell(column.value(row), column.width);
+      return color ? theme.fg(color, cell) : cell;
+    }).join("  "), width)),
+  ];
+}
+
+function formatWidgetCell(value: string, width?: number): string {
+  if (width == null) {
+    return value;
+  }
+  return truncateToWidth(value, width).padEnd(width);
 }
 
 function formatWidgetSummary(rows: PeerActivityRow[], transportDegraded: boolean): string {
@@ -2298,6 +2318,19 @@ function sortWidgetRows(rows: PeerActivityRow[]): PeerActivityRow[] {
     return 2;
   };
   return [...rows].sort((left, right) => priority(left) - priority(right) || left.name.localeCompare(right.name));
+}
+
+function widgetStateColor(row: PeerActivityRow): string {
+  if (row.state === "busy") {
+    return "success";
+  }
+  if (["waiting", "offline"].includes(row.state)) {
+    return "warning";
+  }
+  if (row.state === "error") {
+    return "error";
+  }
+  return "text";
 }
 
 async function collectDashboardData(
@@ -2648,6 +2681,17 @@ function formatIsoTime(value: string): string {
 function compactModel(model: string): string {
   const stripped = model.replace(/^claude-/, "");
   return stripped.length > 12 ? `${stripped.slice(0, 11)}…` : stripped;
+}
+
+function compactDriver(driver: string): string {
+  switch (driver) {
+    case "claude-sdk":
+      return "claude";
+    case "codex-cli":
+      return "codex";
+    default:
+      return driver.length > 7 ? `${driver.slice(0, 6)}…` : driver;
+  }
 }
 
 function hasPeerContextUsage(row: PeerActivityRow): boolean {

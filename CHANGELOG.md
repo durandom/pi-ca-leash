@@ -2,12 +2,13 @@
 
 All notable changes to this repository should be recorded here.
 
-## 0.4.0 - 2026-05-03
+## 0.4.1 - 2026-05-03
 
 ### Changed
 - Runtime model selection now resolves common shorthand aliases such as `sonnet`, `opus`, `haiku`, `mini`, and `spark` to concrete catalog model ids before launching peers, subagents, or teammates.
 - Peer/subagent/team launch surfaces now include prompt-size warnings for large delegated prompts, nudging agents toward smaller slices and file-based context.
 - `runtime_models` reports bundled model aliases alongside exact model ids.
+- Compact Peers widget rendering now uses a small adaptive table layout helper, including a wide-mode driver column and narrow-mode fallback.
 
 ### Fixed
 - Runtime driver errors now add actionable hints for missing Claude Code/Codex executables, Bedrock credential routing, missing API keys, and prompt/context-length failures.
