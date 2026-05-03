@@ -1,5 +1,6 @@
+import { appendFile, mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { ClaudeRuntimeIntercomBridge, extractReplyText, type BridgePeer, PiIntercomTransport } from "@pi-claude-code-agent/intercom-bridge";
 import { ClaudeCodeRuntime, type RuntimeEvent, type RuntimeMessageBlock } from "@pi-claude-code-agent/runtime";
 import { ClaudeCodeSubagentBackend } from "@pi-claude-code-agent/subagents-backend";
@@ -25,8 +26,10 @@ import { describePromptSize } from "./runtime-safety.js";
 import {
   PEER_ASK_TOOL_PROMPT,
   PEER_BRIDGE_APPEND_SYSTEM_PROMPT,
+  EXTENSION_LOG_TOOL_PROMPT,
   PEER_HISTORY_TOOL_PROMPT,
   PEER_INIT_GUIDE,
+  PEER_INIT_USER_HELP,
   PEER_INTERRUPT_TOOL_PROMPT,
   PEER_LIST_TOOL_PROMPT,
   PEER_NO_BABYSITTING_GUIDANCE,
@@ -112,12 +115,27 @@ interface DashboardData {
 }
 
 type CommandMessageLevel = "info" | "success" | "warning" | "error";
+type CommandMessageSurface = "custom" | "tool";
 
 interface CommandMessageDetails {
   level: CommandMessageLevel;
   title: string;
   command?: string;
   timestamp: number;
+  surface?: CommandMessageSurface;
+}
+
+interface ExtensionLogEntryInput {
+  category: "ux" | "agent-guidance" | "tooling" | "runtime" | "model-selection" | "docs" | "bug" | "other";
+  severity: "low" | "medium" | "high";
+  summary: string;
+  observed?: string;
+  expected?: string;
+  reproduction?: string;
+  suggestedFix?: string;
+  relatedCommand?: string;
+  relatedTool?: string;
+  files: string[];
 }
 
 let dashboardContextRef: ExtensionContext | ExtensionCommandContext | undefined;
@@ -213,6 +231,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           level: "warning",
           title: "Intercom disconnected",
           body: "Broker unreachable. Peers stay local until broker connectivity returns.",
+          surface: "custom",
         });
       }
       return false;
@@ -233,6 +252,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           body: needsRebind
             ? "Broker reachable again. Existing peers were rebound to live intercom transport."
             : "Broker reachable again. Peers are back on live intercom transport.",
+          surface: "custom",
         });
       }
     }
@@ -412,6 +432,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         level: "warning",
         title: `Run needs attention: ${shortId(run.runId)}`,
         body: [run.agentName, run.note].filter(Boolean).join("\n\n"),
+        surface: "custom",
       });
     }
 
@@ -456,8 +477,16 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       sendCommandMessage(pi, {
         level: "info",
         command: options.command,
-        title: "How to work with pi-ca-leash",
+        title: "Peer mode active",
+        body: PEER_INIT_USER_HELP,
+        surface: "custom",
+      });
+      sendCommandMessage(pi, {
+        level: "info",
+        command: options.command,
+        title: "Agent orchestration guide",
         body: PEER_INIT_GUIDE,
+        surface: "custom",
       });
     }
     if (runtimeDriverConfig.note && !runtimeDriverFallbackShown) {
@@ -467,6 +496,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         command: options.command,
         title: "Runtime driver config fallback",
         body: runtimeDriverConfig.note,
+        surface: "custom",
       });
     }
   }
@@ -474,13 +504,16 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   pi.registerMessageRenderer("peer-command-result", (message, { expanded }, theme) => {
     const details = (message.details ?? {}) as Partial<CommandMessageDetails>;
     const level = details.level ?? "info";
+    const surface = details.surface ?? "tool";
     const title = details.title ?? "Peer command result";
     const body = typeof message.content === "string" ? message.content.trim() : String(message.content ?? "").trim();
     const color = levelColor(level);
+    const labelColor = surface === "tool" ? "toolTitle" : "customMessageLabel";
+    const bodyColor = surface === "tool" ? "toolOutput" : "customMessageText";
 
-    let text = `${theme.fg("accent", "[peer]")} ${theme.fg(color, title)}`;
+    let text = `${theme.fg(labelColor, "[peer]")} ${theme.fg(color, title)}`;
     if (body) {
-      text += `\n${body}`;
+      text += `\n${theme.fg(bodyColor, body)}`;
     }
 
     if (expanded) {
@@ -493,7 +526,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       }
     }
 
-    const box = new Box(1, 0, (value) => theme.bg("customMessageBg", value));
+    const box = new Box(1, 0, (value) => theme.bg(commandMessageBg(surface, level), value));
     box.addChild(new Text(text, 0, 0));
     return box;
   });
@@ -526,6 +559,56 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           text: formatModelCatalogReport(catalogs, { verbose }),
         }],
         details: { catalogs },
+      };
+    },
+  });
+
+  pi.registerTool({
+    name: "extension_log",
+    label: "Extension Log",
+    description: "Append structured pi-ca-leash extension feedback to .pi-ca-leash/log.md.",
+    promptSnippet: EXTENSION_LOG_TOOL_PROMPT.snippet,
+    promptGuidelines: EXTENSION_LOG_TOOL_PROMPT.guidelines,
+    parameters: {
+      type: "object",
+      properties: {
+        category: {
+          type: "string",
+          enum: ["ux", "agent-guidance", "tooling", "runtime", "model-selection", "docs", "bug", "other"],
+          description: "Feedback category.",
+        },
+        severity: {
+          type: "string",
+          enum: ["low", "medium", "high"],
+          description: "Optional severity. Defaults to medium.",
+        },
+        summary: { type: "string", description: "Concise actionable summary of the problem or rough edge." },
+        observed: { type: "string", description: "What happened or felt rough." },
+        expected: { type: "string", description: "What should have happened or felt smoother." },
+        reproduction: { type: "string", description: "Minimal reproduction or triggering interaction, if known." },
+        suggestedFix: { type: "string", description: "Optional implementation or UX suggestion." },
+        relatedCommand: { type: "string", description: "Related slash command or interaction surface, if any." },
+        relatedTool: { type: "string", description: "Related LLM-callable tool, if any." },
+        files: {
+          type: "array",
+          items: { type: "string" },
+          description: "Relevant local files, if any.",
+        },
+      },
+      required: ["summary"],
+      additionalProperties: false,
+    } as any,
+    async execute(_toolCallId, params) {
+      const input = parseExtensionLogInput(params);
+      const logPath = resolve(rootDir, "log.md");
+      await mkdir(dirname(logPath), { recursive: true });
+      await appendFile(logPath, formatExtensionLogEntry(input), "utf8");
+      return {
+        content: [{
+          type: "text",
+          text: `Logged extension feedback to ${join(STATE_DIR_NAME, "log.md")}.`,
+        }],
+        details: { path: logPath, entry: input },
       };
     },
   });
@@ -1436,6 +1519,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       command,
       title: advanced ? "Peer dashboard · advanced" : "Peer dashboard",
       body: advanced ? formatAdvancedDashboardReport(data) : formatPeerFirstDashboardReport(data),
+      surface: "custom",
     });
   }
 
@@ -1514,6 +1598,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       command,
       title: `Peers (${data.peers.length})`,
       body: formatPeerList(data.snapshot.peerRows),
+      surface: "custom",
     });
   }
 
@@ -1527,6 +1612,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       command,
       title: driver ? `Runtime models: ${driver}` : "Runtime models",
       body: formatModelCatalogReport(catalogs, { verbose }),
+      surface: "custom",
     });
   }
 
@@ -1646,6 +1732,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         `nextCursor ${page.nextCursor ?? "-"}`,
         `history\n${formatQuotedTextBlock(page.text)}`,
       ].join("\n\n"),
+      surface: "custom",
     });
   }
 
@@ -1788,6 +1875,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         "Version/environment",
         `/${command} about`,
       ].join("\n"),
+      surface: "custom",
     });
   }
 
@@ -1805,6 +1893,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         runtimeDriverConfig.note,
         `no-session ${noSessionMode ? "yes" : "no"}`,
       ].filter(Boolean).join("\n"),
+      surface: "custom",
     });
   }
 
@@ -1956,6 +2045,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
             return `${shortId(run.runId)}  ${run.state}${attention ? `  [${attention}]` : ""}  ${run.driver ?? "-"}  ${run.agentName}`;
           }).join("\n")
           : "No runs found.",
+        surface: "custom",
       });
     });
 
@@ -1991,6 +2081,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           run.note ? `note\n${run.note}` : undefined,
           run.result?.summary ? `summary\n${truncate(run.result.summary, 1200)}` : undefined,
         ].filter(Boolean).join("\n\n"),
+        surface: "custom",
       });
     });
 
@@ -2002,6 +2093,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         command: "claude-attention-list",
         title: `Attention (${attention.active.length})`,
         body: formatAttentionReport(attention.active),
+        surface: "custom",
       });
     });
 
@@ -2138,6 +2230,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
           "Tasks",
           tasks.length > 0 ? tasks.map((task) => `${shortId(task.taskId)}  ${task.state}  ${task.assignee}  ${task.title}`).join("\n") : "No tasks.",
         ].join("\n"),
+        surface: "custom",
       });
     });
 
@@ -2169,6 +2262,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         body: sessions.length > 0
           ? sessions.map((session) => `${shortId(session.sessionId)}  ${session.state}  ${session.name ?? "-"}`).join("\n")
           : "No runtime sessions.",
+        surface: "custom",
       });
     });
   }
@@ -2203,7 +2297,7 @@ function registerExtensionCommand(
 
 function sendCommandMessage(
   pi: ExtensionAPI,
-  input: { level: CommandMessageLevel; title: string; body?: string; command?: string },
+  input: { level: CommandMessageLevel; title: string; body?: string; command?: string; surface?: CommandMessageSurface },
 ): void {
   pi.sendMessage(
     {
@@ -2215,6 +2309,7 @@ function sendCommandMessage(
         title: input.title,
         command: input.command,
         timestamp: Date.now(),
+        surface: input.surface ?? "tool",
       } satisfies CommandMessageDetails,
     },
     { triggerTurn: false },
@@ -2227,6 +2322,7 @@ function showUsage(pi: ExtensionAPI, command: string, usage: string): void {
     command,
     title: `Usage: /${command}`,
     body: usage,
+    surface: "custom",
   });
 }
 
@@ -2310,32 +2406,71 @@ interface WidgetColumn<T> {
   value: (row: T) => string;
 }
 
-function createWidgetPeerLayout(rows: PeerActivityRow[], width: number): Array<WidgetColumn<PeerActivityRow>> {
-  const nameWidth = Math.min(12, Math.max(4, ...rows.map((row) => row.name.length)));
-  const stateWidth = Math.min(9, Math.max(5, ...rows.map((row) => row.state.length)));
-  const showLastUpdate = width >= 44;
-  const showModel = width >= 52 && rows.some((row) => row.model);
-  const modelWidth = showModel
-    ? Math.min(12, Math.max(5, ...rows.map((row) => compactModel(row.model ?? "").length)))
-    : 0;
-  const showContext = width >= 64 && rows.some(hasPeerContextUsage);
-  const contextWidth = showContext
-    ? Math.max(3, ...rows.map((row) => formatWidgetContextUsage(row).length))
-    : 0;
-  const showDriver = width >= 78 && rows.some((row) => row.driver);
-  const driverWidth = showDriver
-    ? Math.min(7, Math.max(6, ...rows.map((row) => compactDriver(row.driver ?? "").length)))
-    : 0;
+interface SizedWidgetColumn<T> extends WidgetColumn<T> {
+  key: string;
+  minWidth: number;
+  maxWidth: number;
+  dropPriority?: number;
+}
 
+function createWidgetPeerLayout(rows: PeerActivityRow[], width: number): Array<WidgetColumn<PeerActivityRow>> {
+  const distinctDrivers = new Set(rows.map((row) => row.driver).filter(Boolean)).size;
+  const minActivityWidth = width >= 96 ? 28 : width >= 72 ? 20 : 12;
+  const columns: Array<SizedWidgetColumn<PeerActivityRow> | undefined> = [
+    { key: "peer", label: "peer", minWidth: 8, maxWidth: 24, value: (row) => row.name },
+    { key: "state", label: "state", minWidth: 5, maxWidth: 9, color: widgetStateColor, value: (row) => row.state },
+    distinctDrivers > 1
+      ? { key: "driver", label: "driver", minWidth: 6, maxWidth: 6, dropPriority: 0, color: "dim", value: (row) => row.driver ? compactDriver(row.driver) : "-" }
+      : undefined,
+    rows.some((row) => row.model)
+      ? { key: "model", label: "model", minWidth: 7, maxWidth: 16, dropPriority: 2, color: "dim", value: (row) => row.model ? compactModel(row.model) : "-" }
+      : undefined,
+    rows.some(hasPeerContextUsage)
+      ? { key: "ctx", label: "ctx", minWidth: 4, maxWidth: 6, dropPriority: 1, color: contextUsageColor, value: formatWidgetContextUsage }
+      : undefined,
+    { key: "updated", label: "updated", minWidth: 7, maxWidth: 7, dropPriority: 3, color: "dim", value: (row) => formatWidgetUpdateTime(row.lastUpdateAt) },
+  ];
+
+  let visible = columns.filter((column): column is SizedWidgetColumn<PeerActivityRow> => Boolean(column));
+  while (visible.some((column) => column.dropPriority != null) && widgetTableMinWidth(visible, minActivityWidth) > width) {
+    const dropPriority = Math.min(...visible.filter((column) => column.dropPriority != null).map((column) => column.dropPriority ?? 0));
+    const index = visible.findIndex((column) => column.dropPriority === dropPriority);
+    if (index < 0) {
+      break;
+    }
+    visible = visible.filter((_, currentIndex) => currentIndex !== index);
+  }
+
+  const widths = new Map<string, number>(visible.map((column) => [column.key, column.minWidth]));
+  const gapWidth = widgetTableGapWidth(visible.length + 1);
+  const reservedActivityWidth = widgetTableMinWidth(visible, minActivityWidth) <= width ? minActivityWidth : 1;
+  let extraWidth = Math.max(0, width - gapWidth - reservedActivityWidth - sumWidgetColumnWidths(widths));
+
+  for (const key of ["peer", "model", "state", "driver", "ctx", "updated"]) {
+    const column = visible.find((item) => item.key === key);
+    if (!column || extraWidth <= 0) {
+      continue;
+    }
+    const desiredWidth = measureWidgetColumnWidth(column, rows);
+    const currentWidth = widths.get(column.key) ?? column.minWidth;
+    const nextWidth = Math.min(column.maxWidth, desiredWidth);
+    const growth = Math.min(extraWidth, Math.max(0, nextWidth - currentWidth));
+    if (growth > 0) {
+      widths.set(column.key, currentWidth + growth);
+      extraWidth -= growth;
+    }
+  }
+
+  const activityWidth = Math.max(1, width - gapWidth - sumWidgetColumnWidths(widths));
   return [
-    { label: "peer", width: nameWidth, value: (row) => row.name },
-    { label: "state", width: stateWidth, color: widgetStateColor, value: (row) => row.state },
-    showDriver ? { label: "driver", width: driverWidth, color: "dim", value: (row) => row.driver ? compactDriver(row.driver) : "-" } : undefined,
-    showModel ? { label: "model", width: modelWidth, color: "dim", value: (row) => row.model ? compactModel(row.model) : "-" } : undefined,
-    showContext ? { label: "ctx", width: contextWidth, color: contextUsageColor, value: formatWidgetContextUsage } : undefined,
-    showLastUpdate ? { label: "updated", width: 7, color: "dim", value: (row) => formatIsoTime(row.lastUpdateAt) } : undefined,
-    { label: "activity", value: (row) => row.activity },
-  ].filter((column): column is WidgetColumn<PeerActivityRow> => Boolean(column));
+    ...visible.map((column) => ({
+      label: column.label,
+      width: widths.get(column.key) ?? column.minWidth,
+      color: column.color,
+      value: column.value,
+    })),
+    { label: "activity", width: activityWidth, value: (row) => row.activity },
+  ];
 }
 
 function renderWidgetTable<T>(rows: T[], columns: Array<WidgetColumn<T>>, width: number, theme: WidgetTheme): string[] {
@@ -2771,6 +2906,87 @@ function formatModelAliases(aliases: Record<string, string>): string {
   return entries.map(([alias, target]) => `${alias}->${target}`).join(", ");
 }
 
+function parseExtensionLogInput(params: unknown): ExtensionLogEntryInput {
+  const input = (params ?? {}) as Record<string, unknown>;
+  const category = parseStringEnum(input.category, ["ux", "agent-guidance", "tooling", "runtime", "model-selection", "docs", "bug", "other"], "category") ?? "other";
+  const severity = parseStringEnum(input.severity, ["low", "medium", "high"], "severity") ?? "medium";
+  const summary = cleanLogText(input.summary);
+  if (!summary) {
+    throw new Error("summary is required");
+  }
+  const files = Array.isArray(input.files)
+    ? input.files.map((file) => cleanLogText(file)).filter(Boolean)
+    : [];
+  return {
+    category,
+    severity,
+    summary,
+    observed: cleanOptionalLogText(input.observed),
+    expected: cleanOptionalLogText(input.expected),
+    reproduction: cleanOptionalLogText(input.reproduction),
+    suggestedFix: cleanOptionalLogText(input.suggestedFix),
+    relatedCommand: cleanOptionalLogText(input.relatedCommand),
+    relatedTool: cleanOptionalLogText(input.relatedTool),
+    files,
+  };
+}
+
+function parseStringEnum<const T extends readonly string[]>(value: unknown, allowed: T, field: string): T[number] | undefined {
+  if (value == null) {
+    return undefined;
+  }
+  if (typeof value !== "string") {
+    throw new Error(`${field} must be a string`);
+  }
+  const trimmed = value.trim();
+  if ((allowed as readonly string[]).includes(trimmed)) {
+    return trimmed as T[number];
+  }
+  throw new Error(`${field} must be one of ${allowed.join(", ")}`);
+}
+
+function cleanOptionalLogText(value: unknown): string | undefined {
+  const cleaned = cleanLogText(value);
+  return cleaned || undefined;
+}
+
+function cleanLogText(value: unknown): string {
+  if (typeof value !== "string") {
+    return "";
+  }
+  return value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "").trim();
+}
+
+function formatExtensionLogEntry(input: ExtensionLogEntryInput): string {
+  const lines = [
+    `## ${new Date().toISOString()} - ${input.category} - ${input.severity}`,
+    "",
+    `Summary: ${input.summary}`,
+  ];
+  addLogSection(lines, "Observed", input.observed);
+  addLogSection(lines, "Expected", input.expected);
+  addLogSection(lines, "Reproduction", input.reproduction);
+  addLogSection(lines, "Suggested fix", input.suggestedFix);
+
+  const related = [
+    input.relatedCommand ? `- command: ${input.relatedCommand}` : undefined,
+    input.relatedTool ? `- tool: ${input.relatedTool}` : undefined,
+    ...input.files.map((file) => `- file: ${file}`),
+  ].filter(Boolean);
+  if (related.length > 0) {
+    lines.push("", "Related:", ...related);
+  }
+
+  return `${lines.join("\n")}\n\n`;
+}
+
+function addLogSection(lines: string[], title: string, value?: string): void {
+  if (!value) {
+    return;
+  }
+  lines.push("", `${title}:`, value);
+}
+
 function formatTable(headers: string[], rows: string[][]): string {
   const matrix = [headers, ...rows].map((row) => row.map((cell) => cell ?? ""));
   const widths = headers.map((_, index) => Math.max(...matrix.map((row) => row[index]?.length ?? 0)));
@@ -2781,6 +2997,29 @@ function formatTable(headers: string[], rows: string[][]): string {
 
 function formatIsoTime(value: string): string {
   return formatTime(new Date(value).getTime());
+}
+
+function formatWidgetUpdateTime(value: string): string {
+  return formatIsoTime(value).slice(0, 5);
+}
+
+function measureWidgetColumnWidth<T>(column: SizedWidgetColumn<T>, rows: T[]): number {
+  return Math.min(
+    column.maxWidth,
+    Math.max(column.minWidth, visibleWidth(column.label), ...rows.map((row) => visibleWidth(column.value(row)))),
+  );
+}
+
+function sumWidgetColumnWidths(widths: Map<string, number>): number {
+  return [...widths.values()].reduce((total, value) => total + value, 0);
+}
+
+function widgetTableGapWidth(columns: number): number {
+  return Math.max(0, (columns - 1) * 2);
+}
+
+function widgetTableMinWidth<T>(columns: Array<SizedWidgetColumn<T>>, minActivityWidth: number): number {
+  return columns.reduce((total, column) => total + column.minWidth, minActivityWidth) + widgetTableGapWidth(columns.length + 1);
 }
 
 function compactModel(model: string): string {
@@ -2849,6 +3088,20 @@ function levelColor(level: CommandMessageLevel): string {
       return "error";
     default:
       return "text";
+  }
+}
+
+function commandMessageBg(surface: CommandMessageSurface, level: CommandMessageLevel): string {
+  if (surface === "custom") {
+    return "customMessageBg";
+  }
+  switch (level) {
+    case "success":
+      return "toolSuccessBg";
+    case "error":
+      return "toolErrorBg";
+    default:
+      return "toolPendingBg";
   }
 }
 

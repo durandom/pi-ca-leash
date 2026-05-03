@@ -20,7 +20,7 @@ async function ensurePiTuiStub(): Promise<void> {
     exports: "./index.js",
   }, null, 2)}\n`, "utf8");
   await writeFile(join(dir, "index.js"), [
-    "export class Box { constructor() { this.children = []; } addChild(child) { this.children.push(child); } }",
+    "export class Box { constructor(...args) { this.args = args; this.children = []; } addChild(child) { this.children.push(child); } }",
     "export class Text { constructor(text) { this.text = text; } }",
     "export function truncateToWidth(text, width, suffix = '…') {",
     "  const value = String(text);",
@@ -164,6 +164,12 @@ function latestBody(entries: Array<{ message: any }>): string {
   return String(entries.at(-1)?.message?.content ?? "");
 }
 
+function messageBody(entries: Array<{ message: any }>, title: RegExp): string {
+  const entry = entries.find((item) => title.test(String(item.message?.details?.title ?? "")));
+  assert.ok(entry, `Expected message titled ${title}`);
+  return String(entry.message?.content ?? "");
+}
+
 test("/peer is the only public slash command by default", async () => {
   const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
   try {
@@ -191,9 +197,17 @@ test("/peer help stays passive while /peer init activates and shows guide", asyn
     assert.equal(harness.widgets.has("peer-dashboard"), false);
 
     const initMessages = await harness.run("peer", "init");
-    assert.match(latestBody(initMessages), /How to work with pi-ca-leash:/);
-    assert.match(latestBody(initMessages), /main agent as the orchestrator/);
-    assert.match(latestBody(initMessages), /\/peer models or runtime_models/);
+    const userHelp = messageBody(initMessages, /Peer mode active/);
+    assert.match(userHelp, /Common commands:/);
+    assert.match(userHelp, /\/peer start <prompt>/);
+    assert.match(userHelp, /\/peer help/);
+
+    const agentGuide = messageBody(initMessages, /Agent orchestration guide/);
+    assert.match(agentGuide, /How to work with pi-ca-leash:/);
+    assert.match(agentGuide, /orchestrator in the driver's seat/);
+    assert.match(agentGuide, /multiple specialized peers at the same time/);
+    assert.match(agentGuide, /Use `peer_history` like a human scrolling back/);
+    assert.match(agentGuide, /extension_log/);
     assert.equal(harness.widgets.has("peer-dashboard"), true);
   } finally {
     await harness.close();
@@ -204,12 +218,15 @@ test("first actionable /peer command activates and shows guide once", async () =
   const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
   try {
     const firstMessages = await harness.run("peer", "models codex-cli");
-    assert.match(String(firstMessages.at(0)?.message?.content ?? ""), /How to work with pi-ca-leash:/);
+    assert.match(messageBody(firstMessages, /Peer mode active/), /\/peer help/);
+    assert.match(messageBody(firstMessages, /Agent orchestration guide/), /How to work with pi-ca-leash:/);
     assert.match(latestBody(firstMessages), /codex-cli models/);
     assert.equal(harness.widgets.has("peer-dashboard"), true);
 
     const nextMessages = await harness.run("peer", "list");
-    assert.doesNotMatch(nextMessages.map((entry) => String(entry.message.content ?? "")).join("\n"), /How to work with pi-ca-leash:/);
+    const nextText = nextMessages.map((entry) => String(entry.message.content ?? "")).join("\n");
+    assert.doesNotMatch(nextText, /How to work with pi-ca-leash:/);
+    assert.doesNotMatch(nextText, /Common commands:/);
   } finally {
     await harness.close();
   }
@@ -225,13 +242,34 @@ test("compact peer widget renders summary and column labels", async () => {
     const rendered = widget(undefined, { fg: (_color: string, text: string) => text });
     const lines = rendered.render(88);
     assert.match(lines[0] ?? "", /Peers 1 peer/);
-    assert.match(lines[0] ?? "", /● active|● idle/);
+    assert.match(lines[0] ?? "", /● (active|idle|warning)/);
     assert.match(lines.join("\n"), /peer\s+state\s+(driver\s+)?(model\s+)?updated\s+activity/);
     assert.match(lines.join("\n"), /reviewer/);
 
     const narrowLines = rendered.render(40);
-    assert.match(narrowLines.join("\n"), /peer\s+state\s+activity/);
-    assert.doesNotMatch(narrowLines.join("\n"), /updated/);
+    assert.match(narrowLines.join("\n"), /peer\s+state\s+(updated\s+)?activity/);
+    assert.doesNotMatch(narrowLines.join("\n"), /\b(driver|model)\b/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("compact peer widget adapts widths and hides redundant driver column", async () => {
+  const harness = await loadCommandHarness({ defaultDriver: "codex-cli", codexDelayMs: 150 });
+  try {
+    await harness.run("peer", "start opsx-sonnet-reviewer | Review auth flow briefly. | codex-cli | claude-sonnet-4-6");
+    await harness.run("peer", "start opsx-haiku-reviewer | Summarize docs briefly. | codex-cli | claude-haiku-4-5");
+
+    const widget = harness.widgets.get("peer-dashboard") as ((tui: unknown, theme: { fg: (color: string, text: string) => string }) => { render(width: number): string[] }) | undefined;
+    assert.ok(widget, "Expected peer dashboard widget");
+
+    const rendered = widget(undefined, { fg: (_color: string, text: string) => text });
+    const lines = rendered.render(78).join("\n");
+    assert.doesNotMatch(lines, /\bdriver\b/);
+    assert.match(lines, /peer\s+state\s+model\s+updated\s+activity/);
+    assert.match(lines, /opsx-sonnet-reviewer/);
+    assert.match(lines, /opsx-haiku-reviewer/);
+    assert.match(lines, /\d{2}:\d{2}/);
   } finally {
     await harness.close();
   }
@@ -281,12 +319,19 @@ test("renderer, status, and widget use peer/pi-ca-leash branding", async () => {
 
     const messages = await harness.run("peer", "list");
     assert.equal(String(messages.at(-1)?.message?.customType), "peer-command-result");
+    assert.equal(messages.at(-1)?.message?.details?.surface, "custom");
 
     const renderer = harness.renderers.get("peer-command-result")!;
-    const box = renderer(messages.at(-1)?.message, { expanded: false }, { fg: (_color: string, text: string) => text, bg: (_color: string, text: string) => text });
-    const renderedText = String(box.children?.[0]?.text ?? "");
+    const listBox = renderer(messages.at(-1)?.message, { expanded: false }, {
+      fg: (_color: string, text: string) => text,
+      bg: (_color: string, text: string) => text,
+    });
+    const renderedText = String(listBox.children?.[0]?.text ?? "");
     assert.match(renderedText, /^\[peer\]/);
     assert.doesNotMatch(renderedText, /\[cca\]|pi-claude-code-agent/);
+
+    const startMessages = await harness.run("peer", "start reviewer | Review auth flow and reply briefly.");
+    assert.equal(startMessages.at(-1)?.message?.details?.surface, "tool");
 
     assert.equal(harness.statusUpdates.at(-1)?.name, "pi-ca-leash");
     assert.equal(harness.widgets.has("peer-dashboard"), true);

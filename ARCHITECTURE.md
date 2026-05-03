@@ -128,7 +128,8 @@ Activation model:
 - after activation, the background monitor handles broker connectivity, attention notifications, peer relays, and visible dashboard refreshes
 
 Prompt files:
-- `extensions/prompts/peer-init.md` is the visible operator guide
+- `extensions/prompts/peer-init.md` is the one-time main-agent orchestration guide shown when peer mode is first activated
+- `extensions/prompts/peer-init-user-help.md` is the compact user-facing command cheat sheet shown with peer-mode activation
 - `extensions/prompts/peer-no-babysitting.md` is included in peer start acknowledgments
 - `extensions/prompts/*-tool.md` files provide LLM-callable tool snippets/guidelines
 - `extensions/prompts/peer-bridge-system.md` is appended to runtime-backed peer sessions
@@ -220,6 +221,7 @@ Typical layout:
   subagents/    # subagent run artifacts
   teams/        # teammate and task records
   extension/    # extension-local state such as attention ledger
+  log.md        # append-only local feedback log for extension smoothing
 ```
 
 ## Interaction model

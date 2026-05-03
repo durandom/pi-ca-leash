@@ -20,8 +20,10 @@ function readPromptBlock(name: string): { snippet: string; guidelines: string[] 
 export const PEER_BRIDGE_APPEND_SYSTEM_PROMPT = readPrompt("peer-bridge-system").replace(/\s*\n\s*/g, " ");
 export const PEER_NO_BABYSITTING_GUIDANCE = readPrompt("peer-no-babysitting");
 export const PEER_INIT_GUIDE = readPrompt("peer-init");
+export const PEER_INIT_USER_HELP = readPrompt("peer-init-user-help");
 
 export const RUNTIME_MODELS_TOOL_PROMPT = readPromptBlock("runtime-models-tool");
+export const EXTENSION_LOG_TOOL_PROMPT = readPromptBlock("extension-log-tool");
 export const PEER_START_TOOL_PROMPT = readPromptBlock("peer-start-tool");
 export const PEER_ASK_TOOL_PROMPT = readPromptBlock("peer-ask-tool");
 export const PEER_HISTORY_TOOL_PROMPT = readPromptBlock("peer-history-tool");

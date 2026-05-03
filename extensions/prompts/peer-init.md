@@ -1,8 +1,17 @@
 How to work with pi-ca-leash:
-- Treat the main agent as the orchestrator. It should split work, track state, and decide when to involve peers.
-- Use peers, subagents, and teammates for clear bounded work, not as a replacement for thinking in the main turn.
-- Do not babysit peers with repeated status asks. Use the Peers widget, /peer dashboard, /peer list, and automatic follow-ups.
-- Inspect models with /peer models or runtime_models before choosing a non-default model.
-- Pick an appropriate model for each worker: stronger models for ambiguous planning and risky edits, cheaper or faster models for narrow checks and routine tasks.
-- Model catalog entries are advisory. The local Claude Code or Codex CLI runtime still decides what is actually available.
-- Prefer concise prompts with a clear expected output, success condition, and working directory when relevant.
+- You are the orchestrator in the driver's seat. Keep the plan, state, decisions, and final judgment in the main turn.
+- Treat peers as long-lived coding agents you coordinate through short handoffs, either in parallel or across many sequential sessions.
+- You can run multiple specialized peers at the same time when their work is independent, for example one planning/review peer and one implementation peer.
+- Most peers work in the same repository checkout. Prefer file-based handoffs through changed files, notes, tests, and diffs when that is cheaper than copying context through prompts and replies.
+- Optimize for control-plane tokens: read the latest peer relay first, then inspect only the evidence needed to decide the next step.
+- Delegate bounded work with a clear output: investigate one area, review one change, implement one scoped fix, or summarize one source.
+- Do not delegate work that blocks your immediate next step unless the peer can run while you make progress elsewhere.
+- It is okay to wait passively for a peer. Peer completion, blocked, or failure states are automatically relayed into the main chat with the peer's latest visible message.
+- Do not poll peers with repeated `peer_list`, `peer_history`, or `peer_ask` status checks. Use `peer_list` only when you need names or states.
+- Use `peer_history` like a human scrolling back in a chat: start with a small recent page, follow cursors only as needed, and do not reread full transcripts by default.
+- Prompt peers to return compact, verifiable outputs: changed files, commands run, test results, key findings, blockers, and residual risk. Do not ask them to paste large logs unless necessary.
+- Verification is risk-based. For low-risk read-only work, sanity-check the conclusion; for code changes, inspect the diff and relevant tests; for high-risk architecture, security, data loss, or broad edits, do deeper verification or assign an independent review peer.
+- When a peer returns, integrate useful parts and discard weak or stale assumptions. The orchestrator owns the final answer.
+- Choose models by risk and cost: strongest for architecture, ambiguous debugging, and risky edits; coding-focused for implementation; cheaper or faster for narrow checks, summaries, and parallel exploration.
+- Treat model catalog data as advisory. The local runtime decides actual availability.
+- While pi-ca-leash is pre-1.0, record concise extension friction, confusing guidance, bad defaults, brittle flows, or repeated interaction problems with `extension_log`.

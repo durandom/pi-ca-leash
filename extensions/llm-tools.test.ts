@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmod, mkdir, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -13,6 +13,7 @@ const extensionModuleUrl = pathToFileURL(join(__dirname, "index.ts")).href;
 
 const TOOL_NAMES = [
   "runtime_models",
+  "extension_log",
   "peer_start",
   "peer_list",
   "peer_history",
@@ -95,6 +96,8 @@ async function createCodexStub(delayMs = 0): Promise<string> {
 
 interface FakeTool {
   name: string;
+  promptSnippet?: string;
+  promptGuidelines?: string[];
   execute: (toolCallId: string, params: unknown, signal: AbortSignal | undefined, onUpdate: unknown, ctx: unknown) => Promise<any>;
 }
 
@@ -146,6 +149,7 @@ async function loadExtensionHarness(defaultDriver: "claude-sdk" | "codex-cli", o
 
   return {
     tools,
+    cwd: tempCwd,
     sentMessages,
     userMessages,
     async execute(name: string, params: unknown) {
@@ -179,6 +183,24 @@ test("extension registers expected LLM-callable tools", async () => {
   const harness = await loadExtensionHarness("codex-cli");
   try {
     assert.deepEqual([...harness.tools.keys()].sort(), [...TOOL_NAMES].sort());
+  } finally {
+    await harness.close();
+  }
+});
+
+test("peer tools keep long one-time init guidance out of repeated tool prompts", async () => {
+  const harness = await loadExtensionHarness("codex-cli");
+  try {
+    const peerStart = harness.tools.get("peer_start");
+    assert.ok(peerStart, "Expected peer_start tool");
+    const guidelines = peerStart.promptGuidelines?.join("\n") ?? "";
+    assert.match(guidelines, /Use `peer_start` when you want a reusable long-lived peer/);
+    assert.doesNotMatch(guidelines, /orchestrator in the driver's seat/);
+    assert.doesNotMatch(guidelines, /multiple specialized peers at the same time/);
+
+    const extensionLog = harness.tools.get("extension_log");
+    assert.ok(extensionLog, "Expected extension_log tool");
+    assert.doesNotMatch(extensionLog.promptGuidelines?.join("\n") ?? "", /orchestrator in the driver's seat/);
   } finally {
     await harness.close();
   }
@@ -219,6 +241,33 @@ test("runtime_models exposes driver-specific Lanista catalog", async () => {
     assert.match(verboseText, /max output/);
     assert.match(verboseText, /gpt-5\.1-codex-max/);
     assert.equal(listed.details.catalogs[0].driver, "codex-cli");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("extension_log appends structured local feedback", async () => {
+  const harness = await loadExtensionHarness("codex-cli");
+  try {
+    const result = await harness.execute("extension_log", {
+      category: "ux",
+      severity: "high",
+      summary: "Agent guide mixed operator controls into delegation policy.",
+      observed: "The guide mentioned dashboard and list surfaces.",
+      expected: "Agent-facing guidance should focus on delegation behavior.",
+      suggestedFix: "Keep operator commands in help and agent policy in the init guide.",
+      relatedTool: "peer_init",
+      files: ["extensions/prompts/peer-init.md"],
+    });
+
+    const text = String(result.content?.[0]?.text ?? "");
+    assert.match(text, /\.pi-ca-leash\/log\.md/);
+    const log = await readFile(join(harness.cwd, ".pi-ca-leash", "log.md"), "utf8");
+    assert.match(log, /## .* - ux - high/);
+    assert.match(log, /Summary: Agent guide mixed operator controls/);
+    assert.match(log, /Observed:\nThe guide mentioned dashboard and list surfaces\./);
+    assert.match(log, /- tool: peer_init/);
+    assert.match(log, /- file: extensions\/prompts\/peer-init\.md/);
   } finally {
     await harness.close();
   }

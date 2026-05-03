@@ -2,11 +2,14 @@
 
 All notable changes to this repository should be recorded here.
 
-## 0.6.0 - 2026-05-03
+## 0.7.0 - 2026-05-03
 
 ### Changed
+- Peer slash-command guidance/report messages now stay on pi's standard custom-message theme tokens, while direct action outcomes render on standard tool-state backgrounds for more consistent theming.
+- `/peer init` now carries the one-time main-agent orchestration guide plus a compact user-facing command cheat sheet, while repeated peer tool prompts stay narrowly tool-specific.
 - Runtime model selection now resolves common shorthand aliases such as `sonnet`, `opus`, `haiku`, `mini`, and `spark` to concrete catalog model ids before launching peers, subagents, or teammates.
 - `/peer models` and `runtime_models` now show a shorter recommended model list by default, with advisory use cases and clearer `context window` / `max output` column labels; pass `all`, `advanced`, `verbose`, or `verbose: true` for the full catalog.
+- Added `extension_log`, an LLM-callable local feedback tool that appends structured extension UX and interaction roughness notes to `.pi-ca-leash/log.md`.
 - Peer/subagent/team launch surfaces now include prompt-size warnings for large delegated prompts, nudging agents toward smaller slices and file-based context.
 - `runtime_models` reports bundled model aliases alongside exact model ids.
 - Compact Peers widget rendering now uses a small adaptive table layout helper, including a wide-mode driver column and narrow-mode fallback.

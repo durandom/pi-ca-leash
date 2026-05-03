@@ -100,10 +100,11 @@ Quick check inside pi:
 /peer dashboard advanced
 ```
 
-LLM-callable peer tools:
+LLM-callable tools:
 
 ```text
 runtime_models(driver?, verbose?)
+extension_log(category?, severity?, summary, observed?, expected?, reproduction?, suggestedFix?, relatedCommand?, relatedTool?, files?)
 peer_start(prompt, name?, driver?, model?, cwd?)
 peer_list()
 peer_history(name, cursor?, limit?)
@@ -171,7 +172,7 @@ packages/
   teams-backend/      local persistent teammate backend
 extensions/
   index.ts            pi extension wiring and command/tool surface
-  prompts/            editable prompt and guidance text used by the extension
+  prompts/            editable operator, tool, peer, and agent guidance text
 ```
 
 Useful docs that should remain current:
@@ -206,9 +207,10 @@ Repository-local runtime state is written under:
   subagents/
   teams/
   extension/
+  log.md
 ```
 
-These paths are ignored by git. Remove `.pi-ca-leash/` when you need a clean local manual-test session.
+These paths are ignored by git. `log.md` is an append-only local feedback log for extension UX rough edges, confusing guidance, poor defaults, and repeated interaction problems. Remove `.pi-ca-leash/` when you need a clean local manual-test session.
 
 Older local development state may also exist under ignored paths such as `.pi-claude-code-agent/`, `.claude-runtime/`, or `undefined/`. Those are not part of the package.
 
