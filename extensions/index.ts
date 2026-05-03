@@ -659,7 +659,6 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       });
       peerNameCache.add(peer.name);
       const { row, message } = await syncPeerRelaySnapshot(peer);
-      suppressNextPeerRelay.add(peer.name);
       await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer started: ${peer.name}`);
       sendCommandMessage(pi, {
         level: "success",
@@ -1563,8 +1562,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       cwd,
       permissionMode: "bypassPermissions",
     });
-    suppressNextPeerRelay.add(peer.name);
     peerNameCache.add(peer.name);
+    const { row } = await syncPeerRelaySnapshot(peer);
     await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, `Peer started: ${peer.name}`);
     sendCommandMessage(pi, {
       level: "success",
@@ -1572,7 +1571,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       title: `Peer started: ${peer.name}`,
       body: [
         parsed.autoNamed ? `auto-name ${peer.name}` : undefined,
-        `state ${peer.state}`,
+        `state ${row.state}`,
         `driver ${peer.driver ?? "claude-sdk"}`,
         modelNote,
         promptSizeNote,
