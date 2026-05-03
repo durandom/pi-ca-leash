@@ -155,7 +155,7 @@ npm run build
 For a pinned release install:
 
 ```bash
-pi install git:github.com/durandom/pi-claude-code-agent@v0.1.0
+pi install git:github.com/durandom/pi-ca-leash@v0.1.1
 ```
 
 For local development from this repository root:

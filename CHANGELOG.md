@@ -6,6 +6,12 @@ All notable changes to this repository should be recorded here.
 
 Nothing yet.
 
+## 0.1.1 - 2026-05-03
+
+### Fixed
+- Git pi package installs now build workspace packages during install so extension imports can resolve package `dist/index.js` files.
+- README install instructions now use the renamed `durandom/pi-ca-leash` repository URL.
+
 ## 0.1.0 - 2026-05-03
 
 ### Changed

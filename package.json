@@ -1,7 +1,7 @@
 {
   "name": "pi-ca-leash",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Runtime-first Claude Code leash extension for pi",
   "type": "module",
   "keywords": [
@@ -20,7 +20,8 @@
     ]
   },
   "scripts": {
-    "build": "npm run build --workspaces",
+    "build": "npm run build --workspace @pi-claude-code-agent/runtime && npm run build --workspace @pi-claude-code-agent/intercom-bridge && npm run build --workspace @pi-claude-code-agent/subagents-backend && npm run build --workspace @pi-claude-code-agent/teams-backend",
+    "postinstall": "npm run build",
     "test": "npm run test --workspaces && npm run test:extension",
     "test:extension": "node --test --import tsx ./extensions/**/*.test.ts",
     "smoke": "npm run smoke --workspace @pi-claude-code-agent/runtime",
@@ -33,9 +34,11 @@
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*"
   },
-  "devDependencies": {
+  "dependencies": {
     "@types/node": "^24.9.1",
-    "tsx": "^4.20.6",
     "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.6"
   }
 }

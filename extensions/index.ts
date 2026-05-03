@@ -43,7 +43,7 @@ import {
 } from "./support.js";
 
 const EXTENSION_NAME = "pi-ca-leash";
-const EXTENSION_VERSION = "0.1.0";
+const EXTENSION_VERSION = "0.1.1";
 const STATE_DIR_NAME = ".pi-ca-leash";
 const BACKGROUND_POLL_INTERVAL_MS = 5_000;
 const BACKGROUND_REFRESH_MIN_INTERVAL_MS = 3_000;
