@@ -508,13 +508,11 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     const title = details.title ?? "Peer command result";
     const body = typeof message.content === "string" ? message.content.trim() : String(message.content ?? "").trim();
     const color = levelColor(level);
-    const labelColor = surface === "custom" ? "customMessageLabel" : "toolTitle";
-    const bodyColor = surface === "custom" ? "customMessageText" : "toolOutput";
     const label = surface === "agent" ? "[peer/agent]" : "[peer]";
 
-    let text = `${theme.fg(labelColor, label)} ${theme.fg(color, title)}`;
+    let text = `${theme.fg("toolTitle", label)} ${theme.fg(color, title)}`;
     if (body) {
-      text += `\n${theme.fg(bodyColor, body)}`;
+      text += `\n${theme.fg("toolOutput", body)}`;
     }
 
     if (expanded) {
@@ -3093,10 +3091,7 @@ function levelColor(level: CommandMessageLevel): string {
 }
 
 function commandMessageBg(surface: CommandMessageSurface, level: CommandMessageLevel): string {
-  if (surface === "custom") {
-    return "customMessageBg";
-  }
-  if (surface === "agent") {
+  if (surface === "custom" || surface === "agent") {
     return "toolPendingBg";
   }
   switch (level) {

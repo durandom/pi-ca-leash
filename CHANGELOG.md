@@ -6,6 +6,7 @@ All notable changes to this repository should be recorded here.
 
 ### Changed
 - Peer slash-command guidance/report messages now stay on pi's standard custom-message theme tokens, while direct action outcomes render on standard tool-state backgrounds for more consistent theming.
+- Peer command rendering no longer uses the purple custom-message theme; user and agent surfaces use standard tool-state backgrounds with distinct `[peer]` / `[peer/agent]` labels.
 - `/peer init` now carries the one-time main-agent orchestration guide plus a compact user-facing command cheat sheet, while repeated peer tool prompts stay narrowly tool-specific.
 - Runtime model selection now resolves common shorthand aliases such as `sonnet`, `opus`, `haiku`, `mini`, and `spark` to concrete catalog model ids before launching peers, subagents, or teammates.
 - `/peer models` and `runtime_models` now show a shorter recommended model list by default, with advisory use cases and clearer `context window` / `max output` column labels; pass `all`, `advanced`, `verbose`, or `verbose: true` for the full catalog.

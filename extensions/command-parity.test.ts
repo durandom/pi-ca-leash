@@ -333,20 +333,22 @@ test("renderer, status, and widget use peer/pi-ca-leash branding", async () => {
     const renderer = harness.renderers.get("peer-command-result")!;
     const listBox = renderer(messages.at(-1)?.message, { expanded: false }, {
       fg: (_color: string, text: string) => text,
-      bg: (_color: string, text: string) => text,
+      bg: (color: string, text: string) => `${color}:${text}`,
     });
     const renderedText = String(listBox.children?.[0]?.text ?? "");
     assert.match(renderedText, /^\[peer\]/);
     assert.doesNotMatch(renderedText, /\[cca\]|pi-claude-code-agent/);
+    assert.equal(listBox.args?.[2]?.("body"), "toolPendingBg:body");
 
     const initMessages = await harness.run("peer", "init");
     const guideMessage = initMessages.find((entry) => String(entry.message?.details?.title ?? "") === "Agent orchestration guide")?.message;
     assert.equal(guideMessage?.details?.surface, "agent");
     const guideBox = renderer(guideMessage, { expanded: false }, {
       fg: (_color: string, text: string) => text,
-      bg: (_color: string, text: string) => text,
+      bg: (color: string, text: string) => `${color}:${text}`,
     });
     assert.match(String(guideBox.children?.[0]?.text ?? ""), /^\[peer\/agent\]/);
+    assert.equal(guideBox.args?.[2]?.("body"), "toolPendingBg:body");
 
     const startMessages = await harness.run("peer", "start reviewer | Review auth flow and reply briefly.");
     assert.equal(startMessages.at(-1)?.message?.details?.surface, "tool");

@@ -43,7 +43,7 @@ async function ensurePiTuiStub(): Promise<void> {
     exports: "./index.js",
   }, null, 2)}\n`, "utf8");
   await writeFile(join(dir, "index.js"), [
-    "export class Box { constructor() { this.children = []; } addChild(child) { this.children.push(child); } }",
+    "export class Box { constructor(...args) { this.args = args; this.children = []; } addChild(child) { this.children.push(child); } }",
     "export class Text { constructor(text) { this.text = text; } }",
     "export function truncateToWidth(text, width, suffix = '…') {",
     "  const value = String(text);",
