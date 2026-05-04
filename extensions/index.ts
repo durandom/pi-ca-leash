@@ -12,6 +12,7 @@ import { ADVANCED_COMMANDS_ENV, LEGACY_COMMANDS_ENV, advancedCommandsEnabled, le
 import { derivePeerName } from "./peer-naming.js";
 import {
   createPeerRelaySnapshot,
+  formatPeerAuthoredMessage,
   formatPeerCompletionTurn,
   formatQuotedTextBlock,
   shouldForceRelayPeerCompletion,
@@ -701,7 +702,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
             promptSizeNote,
             `cwd ${peer.cwd}`,
             `session ${peer.sessionId}`,
-            message ? `latest peer message\n${formatQuotedTextBlock(message)}` : undefined,
+            message ? formatPeerAuthoredMessage(message, "Latest peer-authored message:") : undefined,
           ].filter(Boolean).join("\n\n"),
         }],
         details: { peerName: peer.name, state: row.state, sessionId: peer.sessionId, driver: peer.driver, model: peer.model, requestedModel: model, modelNote, promptSizeNote, cwd: peer.cwd, guidance: PEER_NO_BABYSITTING_GUIDANCE },
@@ -741,6 +742,8 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
               driver: peer?.driver,
               model: peer?.model,
               cwd: peer?.cwd,
+              kind: peer?.kind,
+              metadata: peer?.metadata,
             };
           }),
         },
@@ -879,16 +882,17 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         content: [{
           type: "text",
           text: [
-            deliveredAndRunning ? `Peer message delivered: ${name}` : `Peer reply: ${name}`,
-            "sent prompt shown in an operator notification",
-            deliveredAndRunning ? "delivery delivered_and_running" : undefined,
-            deliveredAndRunning ? "do not poll; wait for automated peer update" : undefined,
+            deliveredAndRunning ? `Peer message delivered: ${name}` : `Peer reply received from ${name}`,
+            deliveredAndRunning ? "No immediate peer-authored reply yet. Wait for automated peer update." : undefined,
+            formatPeerAuthoredMessage(visibleReply),
+            "Outgoing prompt shown only in operator notification.",
+            "Tool metadata:",
             `state ${row.state}`,
             `driver ${result.peer.driver ?? "claude-sdk"}`,
             `model ${result.peer.model ?? "-"}`,
+            deliveredAndRunning ? "delivery delivered_and_running" : undefined,
             modelNote,
             promptSizeNote,
-            `quoted peer message\n${formatQuotedTextBlock(visibleReply)}`,
           ].filter(Boolean).join("\n\n"),
         }],
         details: { peerName: name, state: row.state, sessionId: result.peer.sessionId, driver: result.peer.driver, model: result.peer.model, requestedModel: model, modelNote, promptSizeNote, cwd: result.peer.cwd, message, reply: result.reply, deliveryState: result.deliveryState },
@@ -2738,12 +2742,16 @@ function joinLeftRight(left: string, right: string, width: number): string {
   return truncateToWidth(`${left}${" ".repeat(gap)}${right}`, width, "");
 }
 
-function formatPeerList(rows: PeerActivityRow[]): string {
+function formatPeerList(rows: PeerActivityRow[], options: { detailedManagedMetadata?: boolean } = {}): string {
   if (rows.length === 0) {
     return [
       "No peers yet.",
       "hint  /peer start <task or prompt>",
     ].join("\n");
+  }
+
+  if (options.detailedManagedMetadata) {
+    return formatAdvancedPeerList(rows);
   }
 
   const hasDriver = rows.some((row) => row.driver);
@@ -2762,7 +2770,7 @@ function formatPeerList(rows: PeerActivityRow[]): string {
   return formatTable(
     headers,
     rows.map((row) => [
-      row.name,
+      formatPeerListName(row),
       row.state,
       ...(hasDriver ? [row.driver ?? "-"] : []),
       ...(hasModel ? [row.model ?? "-"] : []),
@@ -2771,6 +2779,68 @@ function formatPeerList(rows: PeerActivityRow[]): string {
       formatIsoTime(row.lastUpdateAt),
     ]),
   );
+}
+
+function formatAdvancedPeerList(rows: PeerActivityRow[]): string {
+  const hasDriver = rows.some((row) => row.driver);
+  const hasModel = rows.some((row) => row.model);
+  const hasContext = rows.some(hasPeerContextUsage);
+  const hasKind = rows.some((row) => row.kind);
+  const hasOwner = rows.some((row) => peerMetadataValue(row, "owner"));
+  const hasPersona = rows.some((row) => peerMetadataValue(row, "persona"));
+  const hasCycleId = rows.some((row) => peerMetadataValue(row, "cycleId"));
+  const hasExtraMetadata = rows.some((row) => formatExtraPeerMetadata(row));
+  const headers = [
+    "name",
+    "state",
+    ...(hasKind ? ["kind"] : []),
+    ...(hasOwner ? ["owner"] : []),
+    ...(hasPersona ? ["persona"] : []),
+    ...(hasCycleId ? ["cycle"] : []),
+    ...(hasExtraMetadata ? ["tags"] : []),
+    ...(hasDriver ? ["driver"] : []),
+    ...(hasModel ? ["model"] : []),
+    ...(hasContext ? ["ctx"] : []),
+    "activity",
+    "last update",
+  ];
+
+  return formatTable(
+    headers,
+    rows.map((row) => [
+      row.name,
+      row.state,
+      ...(hasKind ? [row.kind ?? "ad-hoc"] : []),
+      ...(hasOwner ? [peerMetadataValue(row, "owner") ?? "-"] : []),
+      ...(hasPersona ? [peerMetadataValue(row, "persona") ?? "-"] : []),
+      ...(hasCycleId ? [peerMetadataValue(row, "cycleId") ?? "-"] : []),
+      ...(hasExtraMetadata ? [formatExtraPeerMetadata(row) || "-"] : []),
+      ...(hasDriver ? [row.driver ?? "-"] : []),
+      ...(hasModel ? [row.model ?? "-"] : []),
+      ...(hasContext ? [formatPeerContextUsage(row)] : []),
+      row.activity,
+      formatIsoTime(row.lastUpdateAt),
+    ]),
+  );
+}
+
+function formatPeerListName(row: PeerActivityRow): string {
+  if (row.kind !== "managed") {
+    return row.name;
+  }
+  const owner = peerMetadataValue(row, "owner");
+  return owner ? `${row.name} [managed:${owner}]` : `${row.name} [managed]`;
+}
+
+function peerMetadataValue(row: PeerActivityRow, key: string): string | undefined {
+  return row.metadata?.[key];
+}
+
+function formatExtraPeerMetadata(row: PeerActivityRow): string {
+  const entries = Object.entries(row.metadata ?? {})
+    .filter(([key]) => !["owner", "persona", "cycleId"].includes(key))
+    .sort(([left], [right]) => left.localeCompare(right));
+  return entries.map(([key, value]) => `${key}=${value}`).join(", ");
 }
 
 function formatPeerFirstDashboardReport(data: DashboardData): string {
@@ -2817,7 +2887,7 @@ function formatAdvancedDashboardReport(data: DashboardData): string {
   sections.push(
     "",
     "Peers",
-    formatPeerList(snapshot.peerRows),
+    formatPeerList(snapshot.peerRows, { detailedManagedMetadata: true }),
     "",
     "Advanced diagnostics",
     `runtime sessions   ${snapshot.sessions} retained`,

@@ -5,6 +5,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { ClaudeCodeRuntime } from "../packages/runtime/src/index.ts";
+import { PiCaLeashManagedPeerApi, piCaLeashRuntimeStorageDir } from "../packages/intercom-bridge/src/index.ts";
 import { ADVANCED_COMMANDS_ENV, LEGACY_COMMANDS_ENV } from "./command-visibility.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -302,6 +304,54 @@ test("compact peer widget adapts widths and hides redundant driver column", asyn
     assert.match(lines, /opsx-sonnet-reviewer/);
     assert.match(lines, /opsx-haiku-reviewer/);
     assert.match(lines, /\d{2}:\d{2}/);
+  } finally {
+    await harness.close();
+  }
+});
+
+test("dashboard shows minimal managed-owner badge and advanced dashboard shows full managed metadata", async () => {
+  const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
+  try {
+    const runtime = new ClaudeCodeRuntime({
+      storageDir: piCaLeashRuntimeStorageDir(process.cwd()),
+      defaultDriver: "codex-cli",
+    });
+    const managed = new PiCaLeashManagedPeerApi({
+      cwd: process.cwd(),
+      runtime,
+      defaultDriver: "codex-cli",
+      pollIntervalMs: 5,
+      askTimeoutMs: 2_000,
+    });
+
+    await managed.launchPeer({
+      name: "castra-worker",
+      prompt: "You are a brief worker.",
+      model: "gpt-5.3-codex",
+      metadata: { owner: "castra", persona: "atlas", cycleId: "cycle-1" },
+    });
+
+    const noticeBefore = harness.notifications.length;
+    await harness.run("peer", "dashboard");
+    const dashboardText = notificationMatching(harness.notifications.slice(noticeBefore), /Peer dashboard/);
+    assert.match(dashboardText, /castra-worker \[managed:castra\]/);
+    assert.doesNotMatch(dashboardText, /\bpersona\b/);
+    assert.doesNotMatch(dashboardText, /\bcycle\b/);
+
+    const advancedBefore = harness.notifications.length;
+    await harness.run("peer", "dashboard advanced");
+    const advancedText = notificationMatching(harness.notifications.slice(advancedBefore), /Peer dashboard · advanced/);
+    assert.match(advancedText, /\bkind\b/);
+    assert.match(advancedText, /\bowner\b/);
+    assert.match(advancedText, /\bpersona\b/);
+    assert.match(advancedText, /\bcycle\b/);
+    assert.match(advancedText, /castra-worker/);
+    assert.match(advancedText, /managed/);
+    assert.match(advancedText, /castra/);
+    assert.match(advancedText, /atlas/);
+    assert.match(advancedText, /cycle-1/);
+
+    await managed.stop("castra-worker");
   } finally {
     await harness.close();
   }

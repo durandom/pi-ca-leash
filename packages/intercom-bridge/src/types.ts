@@ -20,6 +20,8 @@ export type BridgeState =
 
 export type IntercomMessageKind = "send" | "ask" | "reply";
 
+export type BridgePeerKind = "ad-hoc" | "managed";
+
 export interface BridgePeer {
   name: string;
   sessionId: RuntimeSessionId;
@@ -30,6 +32,8 @@ export interface BridgePeer {
   createdAt: string;
   updatedAt: string;
   lastActivityAt: string;
+  kind?: BridgePeerKind;
+  metadata?: Record<string, string>;
 }
 
 export interface InterruptPeerResult {
@@ -49,11 +53,15 @@ export interface LaunchPeerInput {
   additionalDirectories?: string[];
   env?: Record<string, string>;
   waitForIdle?: boolean;
+  kind?: BridgePeerKind;
+  metadata?: Record<string, string>;
 }
 
 export interface AttachPeerInput {
   name: string;
   sessionId: RuntimeSessionId;
+  kind?: BridgePeerKind;
+  metadata?: Record<string, string>;
 }
 
 export interface IntercomInboundMessage {

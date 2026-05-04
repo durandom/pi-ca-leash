@@ -10,6 +10,8 @@ export interface PeerActivityRow {
   sessionId: string;
   driver?: string;
   model?: string;
+  kind?: string;
+  metadata?: Record<string, string>;
   contextTokens?: number;
   contextWindow?: number;
   contextPercentage?: number;
@@ -30,6 +32,8 @@ export function buildPeerActivityRow(peer: BridgePeer, events: RuntimeEvent[]): 
     sessionId: peer.sessionId,
     driver: peer.driver,
     model: peer.model,
+    kind: peer.kind,
+    metadata: peer.metadata,
     contextTokens: usage?.contextTokens,
     contextWindow: usage?.contextWindow,
     contextPercentage: usage?.contextPercentage,

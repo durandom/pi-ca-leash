@@ -53,14 +53,17 @@ Responsibility:
 - map `send` / `ask` / `reply` style messages into runtime sends
 - wait for the next idle cycle to determine replies
 - persist peer registry for restart restore
+- reconcile persisted peer registry into live bridge state so externally created managed peers can be discovered without restart
 - optionally bind peers to live `pi-intercom` transport when broker is reachable
 - preserve per-peer runtime driver identity
+- expose a supported managed-peer API for downstream orchestrators that want normal peer lifecycle + dashboard visibility
 
 Important consequence:
 - intercom transport is optional
 - the bridge still works locally without live broker presence
 - peers may now be runtime-backed by different drivers
 - extension startup can choose the default peer driver via `PI_CLAUDE_RUNTIME_DRIVER`
+- downstream extensions can use `PiCaLeashManagedPeerApi` from `@pi-claude-code-agent/intercom-bridge` instead of wrapping public `/peer` tools
 - public peer examples stay driver-agnostic; experimental Codex selection is primarily via startup default or LLM-callable tools
 
 ### 3. Subagent backend layer
@@ -131,6 +134,8 @@ Context boundary:
 - command acknowledgments, dashboards, model lists, history pages, and diagnostics are operator-facing UI notifications
 - the main agent context receives only intentional agent-facing prompts, such as the one-time orchestration guide, and automated peer relays
 - peer relays are wrapped follow-up turns containing the latest visible peer message so the orchestrator can decide whether to inspect more history
+- dashboard refreshes re-reconcile the shared peer registry, so managed peers created by other extensions can appear in the live UX without restarting pi
+- the normal dashboard stays compact by showing only a managed-owner badge, while the advanced dashboard can surface fuller managed-peer metadata
 
 Prompt files:
 - `extensions/prompts/peer-init.md` is the one-time main-agent orchestration guide added when peer mode is first activated

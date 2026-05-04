@@ -2,6 +2,13 @@
 
 All notable changes to this repository should be recorded here.
 
+## 0.11.0 - 2026-05-04
+
+### Changed
+- Peer replies that enter main-agent context now label the quoted block as peer-authored content more explicitly and trim wrapper noise, reducing confusion between tool metadata and the peer's actual message.
+- `@pi-claude-code-agent/intercom-bridge` now exposes a supported managed-peer API plus shared pi-ca-leash state-path helpers, and the live peer UX now reconciles externally created peers without requiring a pi restart.
+- `/peer dashboard` now shows a compact managed-owner badge for managed peers, while `/peer dashboard advanced` exposes full managed-peer metadata such as kind, owner, persona, cycle id, and extra tags.
+
 ## 0.10.2 - 2026-05-03
 
 ### Fixed

@@ -5,6 +5,8 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { ClaudeCodeRuntime } from "../packages/runtime/src/index.ts";
+import { PiCaLeashManagedPeerApi, piCaLeashBridgeStorageDir, piCaLeashRuntimeStorageDir } from "../packages/intercom-bridge/src/index.ts";
 import { ADVANCED_COMMANDS_ENV } from "./command-visibility.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -322,7 +324,8 @@ test("peer_ask returns and displays the outgoing prompt", async () => {
     const noticeBefore = harness.notifications.length;
     const asked = await harness.execute("peer_ask", { name: peerName, message: outgoing });
     const toolText = String(asked.content?.[0]?.text ?? "");
-    assert.match(toolText, /sent prompt shown in an operator notification/);
+    assert.match(toolText, /Outgoing prompt shown only in operator notification\./);
+    assert.match(toolText, /Peer-authored message:\n```text/);
     assert.doesNotMatch(toolText, /sent to peer\n```text/);
     assert.equal(asked.details.message, outgoing);
 
@@ -390,6 +393,42 @@ test("peer tools honor codex default driver through extension execute handlers",
     const stopped = await harness.execute("peer_stop", { name: started.details.peerName });
     assert.equal(stopped.details.driver, "codex-cli");
     assert.equal(stopped.details.state, "stopped");
+  } finally {
+    await harness.close();
+  }
+});
+
+test("peer_list discovers managed peers created through shared pi-ca-leash API without restart", async () => {
+  const harness = await loadExtensionHarness("codex-cli");
+  try {
+    await harness.execute("peer_list", {});
+
+    const runtime = new ClaudeCodeRuntime({
+      storageDir: piCaLeashRuntimeStorageDir(harness.cwd),
+      defaultDriver: "codex-cli",
+    });
+    const managed = new PiCaLeashManagedPeerApi({
+      cwd: harness.cwd,
+      runtime,
+      defaultDriver: "codex-cli",
+      pollIntervalMs: 5,
+      askTimeoutMs: 2_000,
+    });
+
+    await managed.launchPeer({
+      name: "castra-worker",
+      prompt: "You are a brief worker.",
+      model: "gpt-5.3-codex",
+      metadata: { owner: "castra", persona: "atlas" },
+    });
+
+    const listed = await harness.execute("peer_list", {});
+    const peer = listed.details.peers.find((entry: any) => entry.name === "castra-worker");
+    assert.ok(peer, "expected externally managed peer to appear in peer_list");
+    assert.equal(peer.kind, "managed");
+    assert.deepEqual(peer.metadata, { owner: "castra", persona: "atlas" });
+
+    await managed.stop("castra-worker");
   } finally {
     await harness.close();
   }

@@ -44,6 +44,10 @@ export function formatQuotedTextBlock(text: string, language = "text"): string {
   return [`${fence}${language}`, text, fence].join("\n");
 }
 
+export function formatPeerAuthoredMessage(text: string, label = "Peer-authored message:"): string {
+  return [label, formatQuotedTextBlock(text)].join("\n");
+}
+
 export function formatPeerCompletionTurn(input: PeerRelayMessageInput): string {
   const headline = input.state === "waiting"
     ? `Peer ${input.peerName} needs input.`
@@ -53,19 +57,13 @@ export function formatPeerCompletionTurn(input: PeerRelayMessageInput): string {
 
   return [
     `[peer_update name=${input.peerName} state=${input.state} session=${shortId(input.sessionId, 12)}]`,
-    "Automated peer update.",
-    "",
-    `Peer: ${input.peerName}`,
-    `State: ${input.state}`,
-    `Session: ${shortId(input.sessionId, 12)}`,
     headline,
     "",
-    "Latest peer message:",
-    formatQuotedTextBlock(input.message),
+    formatPeerAuthoredMessage(input.message),
     "",
-    "Use this as internal orchestration context.",
+    "Use quoted block as peer-authored orchestration context.",
     "Choose next step: continue orchestration, ask follow-up, or ignore if already handled.",
-    "Do not quote this wrapper verbatim to the user.",
+    "Do not quote wrapper metadata verbatim to the user.",
   ].join("\n");
 }
 

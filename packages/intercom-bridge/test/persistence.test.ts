@@ -21,7 +21,7 @@ test("readBridgeRegistry filters invalid peer records", async () => {
   await mkdir(join(storageDir), { recursive: true });
   await writeFile(file, JSON.stringify({
     peers: [
-      { name: "ok", sessionId: "sid-1" },
+      { name: "ok", sessionId: "sid-1", kind: "managed", metadata: { owner: "castra", bad: 123 } },
       { name: "missing-session" },
       { sessionId: "missing-name" },
       { name: 123, sessionId: "sid-2" },
@@ -29,5 +29,5 @@ test("readBridgeRegistry filters invalid peer records", async () => {
   }), "utf8");
 
   const registry = await readBridgeRegistry(storageDir);
-  assert.deepEqual(registry, { peers: [{ name: "ok", sessionId: "sid-1" }] });
+  assert.deepEqual(registry, { peers: [{ name: "ok", sessionId: "sid-1", kind: "managed", metadata: { owner: "castra" } }] });
 });

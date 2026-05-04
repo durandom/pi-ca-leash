@@ -34,7 +34,7 @@ class FakeDriver implements RuntimeDriver {
 test("spawn teammate, assign task, exchange message, stop", async () => {
   const dir = await mkdtemp(join(tmpdir(), "claude-teams-test-"));
   const runtime = new ClaudeCodeRuntime({ storageDir: join(dir, "runtime"), driver: new FakeDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, pollIntervalMs: 5, askTimeoutMs: 2_000 });
+  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
   const backend = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge });
 
   const teammate = await backend.spawnTeammate({ name: "worker", prompt: "You are teammate." });
@@ -60,7 +60,7 @@ test("explicit codex driver is passed through and persisted on teammate record",
     driver: defaultDriver,
     drivers: { "codex-cli": codexDriver },
   });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, pollIntervalMs: 5, askTimeoutMs: 2_000 });
+  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
   const backend = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge });
 
   const teammate = await backend.spawnTeammate({ name: "worker", prompt: "You are teammate.", driver: "codex-cli" });

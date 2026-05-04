@@ -44,29 +44,33 @@ This file is intentionally blunt.
    - Persisted state survives.
    - In-flight control of an already-running host-local process does not fully survive arbitrary host loss.
 
+8. **Managed peers from external orchestrators must use the shared pi-ca-leash state root to appear in the live peer UX.**
+   - The supported path is `PiCaLeashManagedPeerApi` from `@pi-claude-code-agent/intercom-bridge`.
+   - If a downstream caller writes runtime/bridge state somewhere else, `/peer dashboard` and `peer_list` will not discover those peers.
+
 ## UX/coordination limits
 
-8. **Attention ack/snooze is local extension state.**
+9. **Attention ack/snooze is local extension state.**
    - It is persisted across pi restarts in this repo.
    - It is not a shared multi-host or cross-session control protocol.
 
-9. **Teams workflow is intentionally simple.**
+10. **Teams workflow is intentionally simple.**
    - Task classification is heuristic (`DONE:` / `BLOCKED:` style replies).
    - There is no rich board UI, inbox app, or broader collaboration product layer.
 
-10. **Busy handling is strict.**
+11. **Busy handling is strict.**
    - A busy peer can reject concurrent inbound work instead of queueing it.
    - There is no sophisticated queueing/scheduling layer yet.
 
-11. **Peer auto-naming is heuristic.**
+12. **Peer auto-naming is heuristic.**
     - Default `/peer start <prompt>` derives a short readable name from prompt text.
     - Use `/peer start <name> | <prompt>` when you need an exact stable name.
 
-12. **Peer working directory is fixed at start time.**
+13. **Peer working directory is fixed at start time.**
     - Peer tools can choose `cwd` when starting a peer.
     - Changing `cwd` later requires starting a new peer session.
 
-13. **Default peer UX is intentionally compressed.**
+14. **Default peer UX is intentionally compressed.**
     - The main window does not stream live peer transcript output.
     - Peer completion is relayed back as one wrapped follow-up turn instead of live transcript spam.
     - Detailed retained backend diagnostics live in `/peer dashboard advanced`.
@@ -75,6 +79,6 @@ This file is intentionally blunt.
 
 ## Documentation limits
 
-14. **This repo should be documented as it actually works today, not as a future product fantasy.**
+15. **This repo should be documented as it actually works today, not as a future product fantasy.**
     - If the implementation grows, docs must stay equally honest.
     - Remove stale claims rather than letting optimistic historical docs linger.

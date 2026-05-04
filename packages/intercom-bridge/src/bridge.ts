@@ -10,6 +10,7 @@ import {
   defaultBridgeStorageDir,
   readBridgeRegistry,
   writeBridgeRegistry,
+  type PersistedBridgePeerRecord,
 } from "./persistence.js";
 import type {
   AskResult,
@@ -52,7 +53,7 @@ export class ClaudeRuntimeIntercomBridge {
   }
 
   async launchPeer(input: LaunchPeerInput): Promise<BridgePeer> {
-    this.assertPeerNameAvailable(input.name);
+    await this.assertLaunchPeerNameAvailable(input.name);
     const status = await this.runtime.start({
       prompt: input.prompt,
       driver: input.driver,
@@ -65,9 +66,12 @@ export class ClaudeRuntimeIntercomBridge {
       additionalDirectories: input.additionalDirectories,
       env: input.env,
     });
-    const peer = this.peerFromStatus(input.name, status, "starting");
+    const peer = this.peerFromStatus(input.name, status, "starting", {
+      kind: input.kind ?? "ad-hoc",
+      metadata: input.metadata,
+    });
     this.peers.set(peer.name, peer);
-    await this.rememberPeer(peer.name, peer.sessionId);
+    await this.rememberPeer(peer);
     await this.registerTransportPeer(peer.name);
     if (input.waitForIdle !== false) {
       await this.waitForTerminalState(peer.sessionId);
@@ -76,28 +80,40 @@ export class ClaudeRuntimeIntercomBridge {
   }
 
   async attachPeer(input: AttachPeerInput): Promise<BridgePeer> {
-    this.assertPeerNameAvailable(input.name);
+    await this.assertAttachPeerNameAvailable(input);
     const status = await this.runtime.status(input.sessionId);
     if (!status) {
       throw new Error(`Unknown runtime session ${input.sessionId}`);
     }
-    const peer = this.peerFromStatus(input.name, status, mapRuntimeState(status.state, true));
+    const peer = this.peerFromStatus(input.name, status, mapRuntimeState(status.state, true), {
+      kind: input.kind ?? "ad-hoc",
+      metadata: input.metadata,
+    });
     this.peers.set(peer.name, peer);
-    await this.rememberPeer(peer.name, peer.sessionId);
+    await this.rememberPeer(peer);
     await this.registerTransportPeer(peer.name);
     return peer;
   }
 
   async listPeers(): Promise<BridgePeer[]> {
+    await this.restorePeers();
     const peers = await Promise.all([...this.peers.values()].map((peer) => this.syncPeerFromRuntime(peer.name)));
     return peers.sort((a, b) => a.name.localeCompare(b.name));
   }
 
   async status(name: string): Promise<BridgePeer | undefined> {
     if (!this.peers.has(name)) {
+      await this.restorePeers();
+    }
+    if (!this.peers.has(name)) {
       return undefined;
     }
     return this.syncPeerFromRuntime(name);
+  }
+
+  async reconcilePeers(): Promise<BridgePeer[]> {
+    await this.restorePeers();
+    return this.listPeersWithoutRestore();
   }
 
   async send(name: string, message: Omit<IntercomInboundMessage, "kind">, options: { waitForIdle?: boolean } = {}): Promise<BridgePeer> {
@@ -130,7 +146,7 @@ export class ClaudeRuntimeIntercomBridge {
   async stop(name: string): Promise<BridgePeer> {
     const peer = this.requirePeer(name);
     const status = await this.runtime.stop(peer.sessionId);
-    const stopped = this.peerFromStatus(name, status, mapRuntimeState(status.state, true));
+    const stopped = this.peerFromStatus(name, status, mapRuntimeState(status.state, true), peer);
     await this.forgetPeer(name);
     await this.unregisterTransportPeer(name);
     this.peers.delete(name);
@@ -170,17 +186,25 @@ export class ClaudeRuntimeIntercomBridge {
   async restorePeers(): Promise<BridgePeer[]> {
     const registry = await readBridgeRegistry(this.storageDir);
     const restored: BridgePeer[] = [];
-    const survivors: Array<{ name: string; sessionId: string }> = [];
+    const survivors: PersistedBridgePeerRecord[] = [];
 
     for (const record of registry.peers) {
       if (this.peers.has(record.name)) {
-        survivors.push(record);
-        restored.push(this.peers.get(record.name)!);
+        const current = this.mergePersistedPeerRecord(this.peers.get(record.name)!, record);
+        this.peers.set(current.name, current);
+        survivors.push(this.recordFromPeer(current));
+        restored.push(current);
         continue;
       }
       try {
-        const peer = await this.attachPeer(record);
-        survivors.push({ name: peer.name, sessionId: peer.sessionId });
+        const status = await this.runtime.status(record.sessionId);
+        if (!status) {
+          throw new Error(`Unknown runtime session ${record.sessionId}`);
+        }
+        const peer = this.peerFromStatus(record.name, status, mapRuntimeState(status.state, true), record);
+        this.peers.set(peer.name, peer);
+        await this.registerTransportPeer(peer.name);
+        survivors.push(this.recordFromPeer(peer));
         restored.push(peer);
       } catch {
         // Drop stale registry entries.
@@ -293,13 +317,18 @@ export class ClaudeRuntimeIntercomBridge {
       this.peers.set(name, next);
       return next;
     }
-    const next = this.peerFromStatus(name, status, mapRuntimeState(status.state, true));
+    const next = this.peerFromStatus(name, status, mapRuntimeState(status.state, true), peer);
     this.peers.set(name, next);
     await this.transport?.updatePeer(next);
     return next;
   }
 
-  private peerFromStatus(name: string, status: RuntimeStatus, state: BridgeState): BridgePeer {
+  private peerFromStatus(
+    name: string,
+    status: RuntimeStatus,
+    state: BridgeState,
+    preserved: Partial<Pick<BridgePeer, "kind" | "metadata">> = {},
+  ): BridgePeer {
     return {
       name,
       sessionId: status.sessionId,
@@ -310,6 +339,8 @@ export class ClaudeRuntimeIntercomBridge {
       createdAt: status.createdAt,
       updatedAt: status.updatedAt,
       lastActivityAt: status.lastActivityAt,
+      kind: preserved.kind,
+      metadata: cloneMetadata(preserved.metadata),
     };
   }
 
@@ -354,10 +385,10 @@ export class ClaudeRuntimeIntercomBridge {
     await this.deliver(name, inbound, { waitForIdle: false });
   }
 
-  private async rememberPeer(name: string, sessionId: string): Promise<void> {
+  private async rememberPeer(peer: BridgePeer): Promise<void> {
     const registry = await readBridgeRegistry(this.storageDir);
-    const peers = registry.peers.filter((peer) => peer.name !== name);
-    peers.push({ name, sessionId });
+    const peers = registry.peers.filter((entry) => entry.name !== peer.name);
+    peers.push(this.recordFromPeer(peer));
     await writeBridgeRegistry(this.storageDir, { peers: peers.sort((a, b) => a.name.localeCompare(b.name)) });
   }
 
@@ -368,6 +399,28 @@ export class ClaudeRuntimeIntercomBridge {
     });
   }
 
+  private async listPeersWithoutRestore(): Promise<BridgePeer[]> {
+    const peers = await Promise.all([...this.peers.values()].map((peer) => this.syncPeerFromRuntime(peer.name)));
+    return peers.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  private mergePersistedPeerRecord(peer: BridgePeer, record: PersistedBridgePeerRecord): BridgePeer {
+    return {
+      ...peer,
+      kind: record.kind ?? peer.kind,
+      metadata: cloneMetadata(record.metadata ?? peer.metadata),
+    };
+  }
+
+  private recordFromPeer(peer: BridgePeer): PersistedBridgePeerRecord {
+    return {
+      name: peer.name,
+      sessionId: peer.sessionId,
+      kind: peer.kind,
+      metadata: cloneMetadata(peer.metadata),
+    };
+  }
+
   private requirePeer(name: string): BridgePeer {
     const peer = this.peers.get(name);
     if (!peer) {
@@ -376,9 +429,25 @@ export class ClaudeRuntimeIntercomBridge {
     return peer;
   }
 
-  private assertPeerNameAvailable(name: string): void {
+  private async assertLaunchPeerNameAvailable(name: string): Promise<void> {
     if (this.peers.has(name)) {
       throw new Error(`Peer name ${name} already registered`);
+    }
+    const registry = await readBridgeRegistry(this.storageDir);
+    if (registry.peers.some((peer) => peer.name === name)) {
+      throw new Error(`Peer name ${name} already registered`);
+    }
+  }
+
+  private async assertAttachPeerNameAvailable(input: AttachPeerInput): Promise<void> {
+    const existing = this.peers.get(input.name);
+    if (existing) {
+      throw new Error(`Peer name ${input.name} already registered`);
+    }
+    const registry = await readBridgeRegistry(this.storageDir);
+    const persisted = registry.peers.find((peer) => peer.name === input.name);
+    if (persisted && persisted.sessionId !== input.sessionId) {
+      throw new Error(`Peer name ${input.name} already registered`);
     }
   }
 }
@@ -464,6 +533,13 @@ function mapRuntimeState(state: RuntimeStatus["state"], registered: boolean): Br
 
 async function delay(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function cloneMetadata(metadata?: Record<string, string>): Record<string, string> | undefined {
+  if (!metadata || Object.keys(metadata).length === 0) {
+    return undefined;
+  }
+  return Object.fromEntries(Object.entries(metadata).sort(([a], [b]) => a.localeCompare(b)));
 }
 
 function formatTransportInboundText(message: BridgeTransportIncomingMessage): string {

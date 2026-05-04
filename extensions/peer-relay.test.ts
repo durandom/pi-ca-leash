@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createPeerRelaySnapshot,
+  formatPeerAuthoredMessage,
   formatPeerCompletionTurn,
   formatQuotedTextBlock,
   shouldForceRelayPeerCompletion,
@@ -103,6 +104,13 @@ test("quoted text block uses fenced raw text", () => {
   );
 });
 
+test("peer-authored message wrapper is explicit", () => {
+  assert.equal(
+    formatPeerAuthoredMessage("All clear."),
+    ["Peer-authored message:", "```text", "All clear.", "```"].join("\n"),
+  );
+});
+
 test("peer relay formats wrapped main-turn prompt", () => {
   const message = formatPeerCompletionTurn({
     peerName: "reviewer",
@@ -112,11 +120,8 @@ test("peer relay formats wrapped main-turn prompt", () => {
   });
 
   assert.match(message, /\[peer_update name=reviewer state=idle session=573f279f-30e\]/);
-  assert.match(message, /Automated peer update\./);
-  assert.match(message, /Peer: reviewer/);
-  assert.match(message, /State: idle/);
   assert.match(message, /Peer reviewer finished\./);
-  assert.match(message, /Latest peer message:\n```text\nAll clear\.\n```/);
-  assert.match(message, /Use this as internal orchestration context\./);
-  assert.match(message, /Do not quote this wrapper verbatim to the user\./);
+  assert.match(message, /Peer-authored message:\n```text\nAll clear\.\n```/);
+  assert.match(message, /Use quoted block as peer-authored orchestration context\./);
+  assert.match(message, /Do not quote wrapper metadata verbatim to the user\./);
 });

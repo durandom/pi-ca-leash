@@ -14,6 +14,7 @@ After installation, pi gets:
 - named long-lived peers with `/peer start`, `/peer ask`, `/peer send`, `/peer history`, and `/peer stop`
 - a peer dashboard plus local attention state
 - LLM-callable peer tools such as `peer_start`, `peer_ask`, `peer_send`, `peer_history`, and `runtime_models`
+- a supported programmatic managed-peer API for downstream orchestrators via `@pi-claude-code-agent/intercom-bridge`
 - optional local subagent-style runs and local persistent teammates behind advanced commands/tools
 - optional live intercom transport when the broker is reachable
 
@@ -79,13 +80,13 @@ pi install npm:pi-ca-leash
 Pin an explicit version when needed:
 
 ```bash
-pi install npm:pi-ca-leash@0.10.2
+pi install npm:pi-ca-leash@0.11.0
 ```
 
 Install from a pinned git release:
 
 ```bash
-pi install git:github.com/durandom/pi-ca-leash@v0.10.2
+pi install git:github.com/durandom/pi-ca-leash@v0.11.0
 ```
 
 Try this checkout locally:
@@ -211,6 +212,19 @@ The extension keeps peer output quiet by default:
 - peer command acknowledgments and reports are user-only UI notifications, not main-agent context
 - peer completion is relayed back as one wrapped follow-up turn with the latest visible peer message
 - detailed backend diagnostics live in `/peer dashboard advanced`
+
+## Managed peers for downstream orchestrators
+
+If another extension wants workers that behave like normal `pi-ca-leash` peers, use the supported managed-peer surface from `@pi-claude-code-agent/intercom-bridge`:
+
+- `PiCaLeashManagedPeerApi`
+- `piCaLeashStateDir(...)`
+- `piCaLeashRuntimeStorageDir(...)`
+- `piCaLeashBridgeStorageDir(...)`
+
+That API gives downstream orchestrators the normal peer lifecycle (`launch`, `attach`, `list`, `status`, `send`, `ask`, `interrupt`, `stop`, `reconcile`) while writing to the same `.pi-ca-leash/{runtime,bridge}` state used by the extension.
+
+Result: managed peers created by another extension can show up in the live `/peer dashboard` and `peer_list` without requiring a pi restart. The normal dashboard shows a compact `managed:owner` badge, and the advanced dashboard expands full managed-peer metadata.
 
 Runtime driver notes:
 - `claude-sdk` is the default and most complete path
