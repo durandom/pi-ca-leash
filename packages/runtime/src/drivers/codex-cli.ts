@@ -41,7 +41,7 @@ export function buildCodexCliCommand(input: {
       ? "--dangerously-bypass-approvals-and-sandbox"
       : "--full-auto";
   if (input.resumeSessionId) {
-    args.push("resume", "--json", automationFlag);
+    args.push("resume", "--json", automationFlag, "-C", input.cwd);
     if (input.model) {
       args.push("-m", input.model);
     }
