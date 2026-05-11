@@ -1,5 +1,10 @@
 # pi-ca-leash
 
+> [!WARNING]
+> **Agent SDK auth caveat:** the `claude-sdk` runtime path actively sends prompts and follow-up messages through `@anthropic-ai/claude-agent-sdk`, including resumed peer sessions. Anthropic's current Claude Code legal/authentication docs say OAuth subscription credentials are intended for ordinary Claude Code and native Anthropic app use, while developers building products or services with the Agent SDK should use API key authentication through Claude Console or a supported cloud provider. Do not use this extension to route Free, Pro, or Max subscription credentials on behalf of other users.
+>
+> Read-only/local features such as dashboard state, peer history browsing, local persistence, Git operations, and the experimental `codex-cli` runtime path are separate from Claude Agent SDK message sending.
+
 Harness-aware Claude Code and Codex CLI extension for pi.
 
 Claude Code and Codex CLI are more than model endpoints. They are coding harnesses with their own tool loops, session semantics, and increasingly harness-optimized models. `pi-ca-leash` treats them that way.
@@ -59,7 +64,7 @@ Once peer mode is active, you can often ask for this in natural language instead
 
 ## Install
 
-This npm package is available again, but it comes with a large caveat: the Claude-backed runtime path actively sends messages through Anthropic's Agent SDK. Read the Agent SDK auth notice below before using it.
+Read the Agent SDK auth caveat at the top of this README before using the Claude-backed runtime path.
 
 Install from npm:
 
@@ -95,12 +100,6 @@ pi install /absolute/path/to/pi-ca-leash
 ```
 
 `npm install` runs the workspace build through `prepare`, so local development and git-based installs have package `dist/` files available.
-
-### Agent SDK Auth Notice
-
-The `claude-sdk` runtime path actively sends prompts and follow-up messages through `@anthropic-ai/claude-agent-sdk`, including resumed peer sessions. Anthropic's current Claude Code legal/authentication docs say OAuth subscription credentials are intended for ordinary Claude Code and native Anthropic app use, while developers building products or services with the Agent SDK should use API key authentication through Claude Console or a supported cloud provider. Do not use this extension to route Free, Pro, or Max subscription credentials on behalf of other users.
-
-Read-only/local features such as dashboard state, peer history browsing, local persistence, Git operations, and the experimental `codex-cli` runtime path are separate from Claude Agent SDK message sending.
 
 Use Codex as the default runtime driver for newly started peers:
 
