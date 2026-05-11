@@ -4,19 +4,25 @@ This file is intentionally blunt.
 
 ## Product/integration limits
 
-1. **No real upstream `pi-subagents` integration is proven here.**
+1. **npm distribution carries an Agent SDK auth caveat.**
+   - The `claude-sdk` runtime path sends prompts and resumed peer follow-ups through `@anthropic-ai/claude-agent-sdk`.
+   - Anthropic's current Claude Code legal/authentication docs distinguish ordinary OAuth subscription use from products or services built with the Agent SDK, which should use API key or supported cloud-provider authentication.
+   - Do not route Free, Pro, or Max subscription credentials on behalf of other users through this extension.
+   - Read-only/local features and the experimental `codex-cli` runtime path are not Claude Agent SDK message sending.
+
+2. **No real upstream `pi-subagents` integration is proven here.**
    - This repo contains local backend logic and extension wiring.
    - It should not be described as shipped upstream integration unless that is separately verified.
 
-2. **No external `pi-teams` integration exists here.**
+3. **No external `pi-teams` integration exists here.**
    - Teams backend is local to this repository.
    - Do not imply compatibility with a package/product that is not actually present.
 
-3. **Claude fork semantics are not supported.**
+4. **Claude fork semantics are not supported.**
    - `runner=claude-code-agent` rejects real `fork`.
    - Better an explicit error than a fake branch illusion.
 
-4. **Codex support is partial and still not parity-complete.**
+5. **Codex support is partial and still not parity-complete.**
    - Runtime has an experimental `codex-cli` driver.
    - Bridge peers can carry driver identity, including `driver: "codex-cli"`.
    - Extension startup can select Codex as the default driver for new peers via `PI_CLAUDE_RUNTIME_DRIVER=codex-cli`.
@@ -30,12 +36,12 @@ This file is intentionally blunt.
 
 ## Runtime/host limits
 
-5. **Full extension-host smoke coverage is still environment-dependent.**
+6. **Full extension-host smoke coverage is still environment-dependent.**
    - Workspace/package tests pass.
    - Extension helper/state logic is tested directly.
    - Real pi-host loading still depends on an actual pi installation and host runtime.
 
-6. **Live intercom broker transport is optional.**
+7. **Live intercom broker transport is optional.**
    - If the broker is unreachable, local runtime-backed peers still work.
    - Live presence/messaging through the broker is unavailable until reconnect.
    - The extension now waits until `/peer init`, another actionable `/peer` command, or an LLM-callable runtime tool before starting background broker checks.

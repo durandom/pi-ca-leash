@@ -1,6 +1,6 @@
 {
   "name": "pi-ca-leash",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "Harness-aware Claude Code and Codex CLI extension for pi",
   "license": "MIT",
   "repository": {
@@ -13,8 +13,6 @@
   },
   "type": "module",
   "keywords": [
-    "pi-package",
-    "pi-extension",
     "pi-ca-leash",
     "claude-code",
     "codex-cli",

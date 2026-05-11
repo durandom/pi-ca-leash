@@ -2,6 +2,12 @@
 
 All notable changes to this repository should be recorded here.
 
+## Unreleased
+
+### Changed
+- Restored public npm packaging with explicit Agent SDK authentication and subscription-use caveats, while keeping pi.dev discovery keywords removed.
+- Added an Agent SDK auth notice explaining that Claude-backed peer start/send/resume paths actively send messages through `@anthropic-ai/claude-agent-sdk`, while read-only/local features and the experimental Codex path are separate.
+
 ## 0.11.0 - 2026-05-04
 
 ### Changed

@@ -59,7 +59,21 @@ Once peer mode is active, you can often ask for this in natural language instead
 
 ## Install
 
-For most users, if pi already works on your machine and `pi install` works, you do not need to think about Node directly. `pi install npm:pi-ca-leash` is usually enough.
+This npm package is available again, but it comes with a large caveat: the Claude-backed runtime path actively sends messages through Anthropic's Agent SDK. Read the Agent SDK auth notice below before using it.
+
+Install from npm:
+
+```bash
+pi install npm:pi-ca-leash
+```
+
+Pin an explicit version when needed:
+
+```bash
+pi install npm:pi-ca-leash@0.11.1
+```
+
+Local checkout install:
 
 Requirements for normal use:
 - a working pi installation
@@ -71,24 +85,6 @@ Requirements for local development or source installs:
 - Node.js 18 or newer
 - npm
 
-Install from npm:
-
-```bash
-pi install npm:pi-ca-leash
-```
-
-Pin an explicit version when needed:
-
-```bash
-pi install npm:pi-ca-leash@0.11.0
-```
-
-Install from a pinned git release:
-
-```bash
-pi install git:github.com/durandom/pi-ca-leash@v0.11.0
-```
-
 Try this checkout locally:
 
 ```bash
@@ -99,6 +95,12 @@ pi install /absolute/path/to/pi-ca-leash
 ```
 
 `npm install` runs the workspace build through `prepare`, so local development and git-based installs have package `dist/` files available.
+
+### Agent SDK Auth Notice
+
+The `claude-sdk` runtime path actively sends prompts and follow-up messages through `@anthropic-ai/claude-agent-sdk`, including resumed peer sessions. Anthropic's current Claude Code legal/authentication docs say OAuth subscription credentials are intended for ordinary Claude Code and native Anthropic app use, while developers building products or services with the Agent SDK should use API key authentication through Claude Console or a supported cloud provider. Do not use this extension to route Free, Pro, or Max subscription credentials on behalf of other users.
+
+Read-only/local features such as dashboard state, peer history browsing, local persistence, Git operations, and the experimental `codex-cli` runtime path are separate from Claude Agent SDK message sending.
 
 Use Codex as the default runtime driver for newly started peers:
 
