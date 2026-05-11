@@ -229,6 +229,23 @@ test("defaultDriver codex-cli resolves built-in driver without explicit injectio
   }
 });
 
+test("config defaultDriver is used when no method or constructor driver is provided", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-runtime-test-"));
+  const driver = new FakeDriver("claude-cli");
+  const runtime = new ClaudeCodeRuntime({
+    storageDir,
+    drivers: { "claude-cli": driver },
+    config: { defaultDriver: "claude-cli" },
+  });
+
+  const session = await runtime.start({ prompt: "one" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  const status = await runtime.status(session.sessionId);
+  assert.equal(status?.driver, "claude-cli");
+  assert.equal(driver.runs.length, 1);
+});
+
 test("send reuses persisted driver session id", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-runtime-test-"));
   const driver = new RemappedSessionDriver();

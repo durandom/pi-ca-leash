@@ -45,6 +45,7 @@
     "extensions/tool-inputs.ts",
     "extensions/prompts",
     "README.md",
+    "RELEASE_NOTES.md",
     "LICENSE"
   ],
   "publishConfig": {

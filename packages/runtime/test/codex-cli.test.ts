@@ -27,6 +27,39 @@ test("buildCodexCliCommand — resume run", () => {
   assert.deepEqual(args, ["exec", "resume", "--json", "--full-auto", "sid-abc", "continue"]);
 });
 
+test("buildCodexCliCommand — bypassPermissions disables Codex sandbox", () => {
+  const args = buildCodexCliCommand({
+    prompt: "hello",
+    cwd: "/work",
+    permissionMode: "bypassPermissions",
+  });
+  assert.deepEqual(args, [
+    "exec",
+    "--json",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "-C",
+    "/work",
+    "hello",
+  ]);
+});
+
+test("buildCodexCliCommand — bypassPermissions is preserved on resume", () => {
+  const args = buildCodexCliCommand({
+    prompt: "continue",
+    cwd: "/work",
+    resumeSessionId: "sid-abc",
+    permissionMode: "bypassPermissions",
+  });
+  assert.deepEqual(args, [
+    "exec",
+    "resume",
+    "--json",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "sid-abc",
+    "continue",
+  ]);
+});
+
 test("buildCodexCliCommand — model and appendSystemPrompt", () => {
   const args = buildCodexCliCommand({
     prompt: "task",

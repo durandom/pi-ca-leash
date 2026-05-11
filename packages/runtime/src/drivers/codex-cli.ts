@@ -29,14 +29,19 @@ export function buildCodexCliCommand(input: {
   model?: string;
   appendSystemPrompt?: string;
   resumeSessionId?: string;
+  permissionMode?: RuntimeDriverRunInput["permissionMode"];
 }): string[] {
   const effectivePrompt = input.appendSystemPrompt
     ? `<system>\n${input.appendSystemPrompt}\n</system>\n\n${input.prompt}`
     : input.prompt;
 
   const args: string[] = ["exec"];
+  const automationFlag =
+    input.permissionMode === "bypassPermissions"
+      ? "--dangerously-bypass-approvals-and-sandbox"
+      : "--full-auto";
   if (input.resumeSessionId) {
-    args.push("resume", "--json", "--full-auto");
+    args.push("resume", "--json", automationFlag);
     if (input.model) {
       args.push("-m", input.model);
     }
@@ -44,7 +49,7 @@ export function buildCodexCliCommand(input: {
     return args;
   }
 
-  args.push("--json", "--full-auto", "-C", input.cwd);
+  args.push("--json", automationFlag, "-C", input.cwd);
   if (input.model) {
     args.push("-m", input.model);
   }
@@ -191,15 +196,13 @@ export class CodexCliDriver implements RuntimeDriver {
         `codex-cli driver does not support permissionMode=${input.permissionMode}`,
       );
     }
-    // permissionMode acceptEdits/auto/bypassPermissions/default are accepted but not
-    // mapped to sandbox flags — --full-auto is always passed in this slice
-
     const args = buildCodexCliCommand({
       prompt: input.prompt,
       cwd: input.cwd,
       model: input.model,
       appendSystemPrompt: input.appendSystemPrompt,
       resumeSessionId: input.resumeSessionId,
+      permissionMode: input.permissionMode,
     });
 
     const env: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };

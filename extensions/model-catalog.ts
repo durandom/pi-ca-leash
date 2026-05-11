@@ -39,7 +39,7 @@ export interface RuntimeModelSelection {
 
 const LANISTA_SOURCE = "lanista agents anthropic/codex";
 
-export const RUNTIME_MODEL_CATALOGS: Record<RuntimeDriverName, RuntimeDriverModelCatalog> = {
+export const RUNTIME_MODEL_CATALOGS: Record<string, RuntimeDriverModelCatalog> = {
   "claude-sdk": {
     driver: "claude-sdk",
     provider: "anthropic",
@@ -118,18 +118,18 @@ export const RUNTIME_MODEL_CATALOGS: Record<RuntimeDriverName, RuntimeDriverMode
 
 export function modelCatalogsForDriver(driver?: RuntimeDriverName): RuntimeDriverModelCatalog[] {
   if (driver) {
-    return [RUNTIME_MODEL_CATALOGS[driver]];
+    return [catalogForDriver(driver)];
   }
-  return [RUNTIME_MODEL_CATALOGS["claude-sdk"], RUNTIME_MODEL_CATALOGS["codex-cli"]];
+  return [catalogForDriver("claude-sdk"), catalogForDriver("claude-cli"), catalogForDriver("codex-cli")];
 }
 
 export function findRuntimeModel(driver: RuntimeDriverName, model: string): RuntimeModelCatalogEntry | undefined {
   const normalized = model.trim();
-  return RUNTIME_MODEL_CATALOGS[driver].models.find((entry) => entry.id === normalized);
+  return catalogForDriver(driver).models.find((entry) => entry.id === normalized);
 }
 
 export function resolveRuntimeModelSelection(driver: RuntimeDriverName, model?: string): RuntimeModelSelection {
-  const catalog = RUNTIME_MODEL_CATALOGS[driver];
+  const catalog = catalogForDriver(driver);
   const requestedModel = model?.trim() || undefined;
   if (!requestedModel) {
     return {
@@ -166,6 +166,20 @@ export function resolveRuntimeModelSelection(driver: RuntimeDriverName, model?: 
     entry,
     note: entryNote,
   };
+}
+
+function catalogForDriver(driver: RuntimeDriverName): RuntimeDriverModelCatalog {
+  if (driver === "claude-cli") {
+    const base = RUNTIME_MODEL_CATALOGS["claude-sdk"]!;
+    return {
+      ...base,
+      driver,
+      cli: "claude",
+      flag: "claude -p --model <id>",
+      source: `${base.source}; shared with claude-sdk catalog`,
+    };
+  }
+  return RUNTIME_MODEL_CATALOGS[driver]!;
 }
 
 export function describeModelSelection(driver: RuntimeDriverName, model?: string): string | undefined {

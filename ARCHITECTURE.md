@@ -9,15 +9,15 @@
 That leads to a layered design.
 
 ```text
-Claude SDK driver (default)    Codex CLI driver (experimental)
-             ↓                          ↓
-                   packages/runtime
-                          ↓
-               packages/intercom-bridge
-                          ↓
-     packages/subagents-backend    packages/teams-backend
-                          ↓                     ↓
-                       extensions/index.ts
+Claude SDK driver (default)    Claude CLI driver (optional)    Codex CLI driver (experimental)
+             ↓                              ↓                              ↓
+                              packages/runtime
+                                     ↓
+                          packages/intercom-bridge
+                                     ↓
+            packages/subagents-backend        packages/teams-backend
+                                     ↓                         ↓
+                                  extensions/index.ts
 ```
 
 ## Layers
@@ -38,6 +38,7 @@ This package is the source of truth for runtime session lifecycle.
 
 Current drivers:
 - `claude-sdk` is the default and most complete path.
+- `claude-cli` shells out to local `claude -p --output-format stream-json` and avoids importing `@anthropic-ai/claude-agent-sdk`.
 - `codex-cli` exists as an experimental runtime driver with a narrower supported option set.
 
 Important consequence:
@@ -62,7 +63,7 @@ Important consequence:
 - intercom transport is optional
 - the bridge still works locally without live broker presence
 - peers may now be runtime-backed by different drivers
-- extension startup can choose the default peer driver via `PI_CLAUDE_RUNTIME_DRIVER`
+- extension startup can choose the default peer driver via config files or `PI_CLAUDE_RUNTIME_DRIVER`
 - downstream extensions can use `PiCaLeashManagedPeerApi` from `@pi-claude-code-agent/intercom-bridge` instead of wrapping public `/peer` tools
 - public peer examples stay driver-agnostic; experimental Codex selection is primarily via startup default or LLM-callable tools
 
@@ -158,6 +159,7 @@ Responsibility:
 
 Current mapping:
 - `claude-sdk` uses the Lanista `anthropic` catalog and passes models to the Claude SDK / Claude Code runtime.
+- `claude-cli` shares the Lanista `anthropic` catalog and passes models to `claude -p --model`.
 - `codex-cli` uses the Lanista `openai-codex` catalog and passes models as `codex -m` / `codex --model` compatible ids.
 
 Important consequence:
@@ -181,7 +183,7 @@ cd /Users/mhild/src/durandom/b4arena/lanista
 ```
 
 Then copy the relevant provider records into `extensions/model-catalog.ts`:
-- Lanista `anthropic` -> `RUNTIME_MODEL_CATALOGS["claude-sdk"]`
+- Lanista `anthropic` -> `RUNTIME_MODEL_CATALOGS["claude-sdk"]`; `claude-cli` derives from this catalog
 - Lanista `openai-codex` -> `RUNTIME_MODEL_CATALOGS["codex-cli"]`
 
 Keep these fields when updating entries:
@@ -201,6 +203,13 @@ npm run build
 ```
 
 Do not add a runtime dependency from this repo to Lanista unless the extension needs live model refresh. The default should stay deterministic and offline-friendly.
+
+## Release Documentation
+
+User-visible runtime, configuration, distribution, and auth-boundary changes should be recorded in both:
+
+- `CHANGELOG.md` for concise chronological change tracking
+- `RELEASE_NOTES.md` for user-facing upgrade notes, examples, and caveats
 
 ## Runtime-first design rationale
 

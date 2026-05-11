@@ -1,10 +1,11 @@
 import { parseRuntimeDriverName } from "./runtime-driver.js";
+import type { RuntimeDriverName } from "@pi-claude-code-agent/runtime";
 
 export interface ParsedSubagentRunToolInput {
   task: string;
   name: string;
   prompt: string;
-  driver?: "claude-sdk" | "codex-cli";
+  driver?: RuntimeDriverName;
   model?: string;
   cwd?: string;
   async: boolean;
@@ -13,7 +14,7 @@ export interface ParsedSubagentRunToolInput {
 export interface ParsedTeamSpawnToolInput {
   name: string;
   prompt: string;
-  driver?: "claude-sdk" | "codex-cli";
+  driver?: RuntimeDriverName;
   model?: string;
   cwd?: string;
 }
@@ -37,7 +38,7 @@ export function parseSubagentRunToolInput(input: {
 
   const driver = input.driver == null ? undefined : parseRuntimeDriverName(input.driver);
   if (input.driver != null && !driver) {
-    throw new Error("driver must be claude-sdk or codex-cli");
+    throw new Error("driver must be claude-sdk, claude-cli, or codex-cli");
   }
 
   return {
@@ -66,7 +67,7 @@ export function parseTeamSpawnToolInput(input: {
 
   const driver = input.driver == null ? undefined : parseRuntimeDriverName(input.driver);
   if (input.driver != null && !driver) {
-    throw new Error("driver must be claude-sdk or codex-cli");
+    throw new Error("driver must be claude-sdk, claude-cli, or codex-cli");
   }
 
   return {

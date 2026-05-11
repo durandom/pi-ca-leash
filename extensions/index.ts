@@ -78,6 +78,8 @@ const EXTENSION_VERSION = String((extensionRequire("../package.json") as { versi
 const STATE_DIR_NAME = ".pi-ca-leash";
 const BACKGROUND_POLL_INTERVAL_MS = 5_000;
 const BACKGROUND_REFRESH_MIN_INTERVAL_MS = 3_000;
+const RUNTIME_DRIVER_ENUM = ["claude-sdk", "claude-cli", "codex-cli"] as const;
+const RUNTIME_DRIVER_USAGE = "claude-sdk, claude-cli, or codex-cli";
 const DEFAULT_SNOOZE_MINUTES = 15;
 
 interface DashboardSnapshot {
@@ -147,10 +149,11 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   const cwd = process.cwd();
   const rootDir = resolve(cwd, STATE_DIR_NAME);
   const attentionLedgerPath = resolve(rootDir, "extension", "attention-ledger.json");
-  const runtimeDriverConfig = resolveExtensionRuntimeDriverConfig();
+  const runtimeDriverConfig = resolveExtensionRuntimeDriverConfig(process.env, cwd);
   const runtime = new ClaudeCodeRuntime({
     storageDir: resolve(rootDir, "runtime"),
     defaultDriver: runtimeDriverConfig.defaultDriver,
+    config: runtimeDriverConfig.config,
   });
   const bridge = new ClaudeRuntimeIntercomBridge({
     runtime,
@@ -188,7 +191,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
   async function startPeerWithoutWaiting(input: {
     name: string;
     prompt: string;
-    driver?: "claude-sdk" | "codex-cli";
+    driver?: (typeof RUNTIME_DRIVER_ENUM)[number];
     cwd?: string;
     model?: string;
     permissionMode?: "default" | "acceptEdits" | "plan" | "dontAsk" | "bypassPermissions";
@@ -547,7 +550,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     parameters: {
       type: "object",
       properties: {
-        driver: { type: "string", enum: ["claude-sdk", "codex-cli"], description: "Optional runtime driver to filter the model catalog." },
+        driver: { type: "string", enum: [...RUNTIME_DRIVER_ENUM], description: "Optional runtime driver to filter the model catalog." },
         verbose: { type: "boolean", description: "When true, include every model from the bundled catalog instead of the short recommended list." },
       },
       additionalProperties: false,
@@ -556,7 +559,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       const input = params as { driver?: unknown; verbose?: unknown };
       const driver = input.driver == null ? undefined : parseRuntimeDriverName(input.driver);
       if (input.driver != null && !driver) {
-        throw new Error("driver must be claude-sdk or codex-cli");
+        throw new Error(`driver must be ${RUNTIME_DRIVER_USAGE}`);
       }
       const verbose = input.verbose === true;
       const catalogs = modelCatalogsForDriver(driver);
@@ -631,7 +634,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       properties: {
         prompt: { type: "string", description: "Task or role prompt for the peer." },
         name: { type: "string", description: "Optional explicit peer name." },
-        driver: { type: "string", enum: ["claude-sdk", "codex-cli"], description: "Optional runtime driver for this peer. Defaults to the extension startup driver." },
+        driver: { type: "string", enum: [...RUNTIME_DRIVER_ENUM], description: "Optional runtime driver for this peer. Defaults to the extension startup driver." },
         model: { type: "string", description: "Optional model to use for this peer session." },
         cwd: { type: "string", description: "Optional working directory for the peer. Relative paths resolve from the current pi working directory." },
       },
@@ -650,7 +653,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         throw new Error("prompt required");
       }
       if (input.driver != null && !driver) {
-        throw new Error("driver must be claude-sdk or codex-cli");
+        throw new Error(`driver must be ${RUNTIME_DRIVER_USAGE}`);
       }
       const effectiveDriver = driver ?? runtimeDriverConfig.defaultDriver;
       const modelSelection = resolveRuntimeModelSelection(effectiveDriver, model);
@@ -1137,7 +1140,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         task: { type: "string", description: "Task for the delegated run." },
         name: { type: "string", description: "Optional agent name for this run." },
         prompt: { type: "string", description: "Optional agent prompt. Defaults to a concise delegated-worker prompt." },
-        driver: { type: "string", enum: ["claude-sdk", "codex-cli"], description: "Optional runtime driver for this run." },
+        driver: { type: "string", enum: [...RUNTIME_DRIVER_ENUM], description: "Optional runtime driver for this run." },
         model: { type: "string", description: "Optional model override for this run." },
         cwd: { type: "string", description: "Optional working directory for this run. Relative paths resolve from the current pi working directory." },
         async: { type: "boolean", description: "Launch as background run and return immediately." },
@@ -1300,7 +1303,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       properties: {
         name: { type: "string", description: "Teammate name." },
         prompt: { type: "string", description: "Teammate bootstrap prompt." },
-        driver: { type: "string", enum: ["claude-sdk", "codex-cli"], description: "Optional runtime driver for this teammate." },
+        driver: { type: "string", enum: [...RUNTIME_DRIVER_ENUM], description: "Optional runtime driver for this teammate." },
         model: { type: "string", description: "Optional model override." },
         cwd: { type: "string", description: "Optional working directory. Relative paths resolve from the current pi working directory." },
       },
@@ -1901,7 +1904,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         `/${command} ask <name> | <message>`,
         `/${command} send <name> | <message>`,
         `/${command} list`,
-        `/${command} models [claude-sdk|codex-cli] [all|advanced|verbose]`,
+        `/${command} models [claude-sdk|claude-cli|codex-cli] [all|advanced|verbose]`,
         `/${command} history <name> [cursor] [limit]`,
         `/${command} interrupt <name>`,
         `/${command} stop <name>`,
@@ -1910,7 +1913,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         "Driver/model forms",
         `/${command} start <prompt> | <driver> | <model>`,
         `/${command} start <name> | <prompt> | <driver> | <model>`,
-        "drivers: claude-sdk, codex-cli",
+        `drivers: ${RUNTIME_DRIVER_USAGE}`,
         "model aliases: sonnet, opus, haiku, mini, spark; exact ids are shown by /peer models",
         "",
         "Version/environment",
@@ -2683,7 +2686,7 @@ function completePeerCommand(prefix: string, names: Set<string>): AutocompleteIt
   }
   if (subcommand === "models") {
     const trimmed = restParts.join(" ").trim();
-    const items = ["claude-sdk", "codex-cli"]
+    const items = [...RUNTIME_DRIVER_ENUM]
       .filter((driver) => trimmed.length === 0 || driver.startsWith(trimmed))
       .map((driver) => ({ value: driver, label: driver }));
     return items.length > 0 ? items : null;
@@ -2972,8 +2975,8 @@ function formatAttentionReport(attention: AttentionView[]): string {
   );
 }
 
-function parsePeerModelsArgs(args: string): { driver?: "claude-sdk" | "codex-cli"; verbose: boolean } {
-  let driver: "claude-sdk" | "codex-cli" | undefined;
+function parsePeerModelsArgs(args: string): { driver?: (typeof RUNTIME_DRIVER_ENUM)[number]; verbose: boolean } {
+  let driver: (typeof RUNTIME_DRIVER_ENUM)[number] | undefined;
   let verbose = false;
   for (const token of args.trim().split(/\s+/).filter(Boolean)) {
     const parsedDriver = parseRuntimeDriverName(token);
@@ -2985,7 +2988,7 @@ function parsePeerModelsArgs(args: string): { driver?: "claude-sdk" | "codex-cli
       verbose = true;
       continue;
     }
-    throw new Error("usage: /peer models [claude-sdk|codex-cli] [all|advanced|verbose]");
+    throw new Error("usage: /peer models [claude-sdk|claude-cli|codex-cli] [all|advanced|verbose]");
   }
   return { driver, verbose };
 }
@@ -3173,6 +3176,8 @@ function compactModel(model: string): string {
 function compactDriver(driver: string): string {
   switch (driver) {
     case "claude-sdk":
+      return "sdk";
+    case "claude-cli":
       return "claude";
     case "codex-cli":
       return "codex";

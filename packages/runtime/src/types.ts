@@ -1,7 +1,7 @@
 import type { NormalizedDriverMessage } from "./drivers/messages.js";
 
 export type RuntimeSessionId = string;
-export type RuntimeDriverName = "claude-sdk" | "codex-cli";
+export type RuntimeDriverName = "claude-sdk" | "claude-cli" | "codex-cli";
 
 export type RuntimeSessionState =
   | "starting"
@@ -242,4 +242,5 @@ export interface RuntimeOptions {
   drivers?: Partial<Record<RuntimeDriverName, RuntimeDriver>>;
   defaultDriver?: RuntimeDriverName;
   resolveDriver?: RuntimeDriverResolver;
+  config?: import("./config.js").PiCaLeashConfig;
 }

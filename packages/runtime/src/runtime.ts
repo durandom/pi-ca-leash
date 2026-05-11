@@ -13,7 +13,9 @@ import {
   writeState,
 } from "./persistence.js";
 import { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js";
+import { ClaudeCliDriver } from "./drivers/claude-cli.js";
 import { CodexCliDriver } from "./drivers/codex-cli.js";
+import { loadPiCaLeashConfigSync } from "./config.js";
 import type { NormalizedDriverMessageBlock } from "./drivers/messages.js";
 import type {
   DriverEventEnvelope,
@@ -57,9 +59,17 @@ export class ClaudeCodeRuntime {
   constructor(options: RuntimeOptions = {}) {
     this.storageDir = resolve(options.storageDir ?? defaultStorageDir());
 
+    const config = options.config ?? loadPiCaLeashConfigSync().config;
     const defaultClaudeDriver = new ClaudeSdkDriver();
-    const defaultCodexDriver = new CodexCliDriver();
+    const defaultClaudeCliDriver = new ClaudeCliDriver({
+      executable: config.drivers?.["claude-cli"]?.executable,
+      defaultPermissionMode: config.drivers?.["claude-cli"]?.permissionMode,
+    });
+    const defaultCodexDriver = new CodexCliDriver({
+      executable: config.drivers?.["codex-cli"]?.executable,
+    });
     this.drivers.set(defaultClaudeDriver.name, defaultClaudeDriver);
+    this.drivers.set(defaultClaudeCliDriver.name, defaultClaudeCliDriver);
     this.drivers.set(defaultCodexDriver.name, defaultCodexDriver);
     if (options.drivers) {
       for (const driver of Object.values(options.drivers)) {
@@ -72,7 +82,7 @@ export class ClaudeCodeRuntime {
       this.drivers.set(options.driver.name, options.driver);
     }
 
-    this.defaultDriverName = options.defaultDriver ?? options.driver?.name ?? "claude-sdk";
+    this.defaultDriverName = options.defaultDriver ?? options.driver?.name ?? config.defaultDriver ?? "claude-sdk";
     this.resolveDriverByName = options.resolveDriver ?? ((name) => {
       const driver = this.drivers.get(name);
       if (!driver) {

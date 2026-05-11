@@ -1,6 +1,8 @@
 export { ClaudeCodeRuntime } from "./runtime.js";
 export { RUNTIME_DRIVER_ENV, parseRuntimeDriverName, resolveRuntimeDriverFromEnv } from "./driver-config.js";
+export { PI_CA_LEASH_CONFIG_ENV, defaultConfigPaths, loadPiCaLeashConfigSync, repositoryConfigPath, xdgConfigPath } from "./config.js";
 export { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js";
+export { ClaudeCliDriver, buildClaudeCliCommand } from "./drivers/claude-cli.js";
 export { CodexCliDriver, parseCodexCliEvent, buildCodexCliCommand } from "./drivers/codex-cli.js";
 export type { NormalizedDriverMessage } from "./drivers/messages.js";
 export type {
@@ -22,3 +24,4 @@ export type {
   ToolEvent,
   TranscriptChunk,
 } from "./types.js";
+export type { LoadedPiCaLeashConfig, PiCaLeashConfig, RuntimeDriverFileConfig } from "./config.js";

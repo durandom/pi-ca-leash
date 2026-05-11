@@ -5,8 +5,12 @@ All notable changes to this repository should be recorded here.
 ## Unreleased
 
 ### Changed
+- Added an optional `claude-cli` runtime driver that shells out to local `claude -p --output-format stream-json`, preserves the existing `claude-sdk` driver, and supports resumed peer follow-up sends via Claude Code session ids.
+- Added pi-ca-leash JSON config loading from XDG global config, repository-local `.pi-ca-leash/config.json`, and optional `PI_CA_LEASH_CONFIG`, with explicit tool/command driver parameters and `PI_CLAUDE_RUNTIME_DRIVER` taking precedence for driver selection.
+- Mapped `codex-cli` `permissionMode: "bypassPermissions"` to Codex's unsandboxed exec flag for fresh and resumed peer runs.
+- Added `RELEASE_NOTES.md` with user-facing notes and examples for the new runtime/configuration behavior.
 - Restored public npm packaging with explicit Agent SDK authentication and subscription-use caveats, while keeping pi.dev discovery keywords removed.
-- Added an Agent SDK auth notice explaining that Claude-backed peer start/send/resume paths actively send messages through `@anthropic-ai/claude-agent-sdk`, while read-only/local features and the experimental Codex path are separate.
+- Updated the top-level Claude Code auth warning to distinguish direct `claude-sdk` Agent SDK use from the new local `claude-cli` print-mode path, while keeping read-only/local features and the experimental Codex path separate.
 
 ## 0.11.0 - 2026-05-04
 

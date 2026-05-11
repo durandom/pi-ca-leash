@@ -1,7 +1,7 @@
 # pi-ca-leash
 
 > [!WARNING]
-> **Agent SDK auth caveat:** the `claude-sdk` runtime path actively sends prompts and follow-up messages through `@anthropic-ai/claude-agent-sdk`, including resumed peer sessions. Anthropic's current Claude Code legal/authentication docs say OAuth subscription credentials are intended for ordinary Claude Code and native Anthropic app use, while developers building products or services with the Agent SDK should use API key authentication through Claude Console or a supported cloud provider. Do not use this extension to route Free, Pro, or Max subscription credentials on behalf of other users.
+> **Claude Code auth caveat:** the default `claude-sdk` runtime path actively sends prompts and follow-up messages through `@anthropic-ai/claude-agent-sdk`, including resumed peer sessions. The optional `claude-cli` runtime path avoids that SDK package and shells out to `claude -p`, but it is still non-interactive Claude Code message sending. Anthropic's current Claude Code legal/authentication docs say OAuth subscription credentials are intended for ordinary Claude Code and native Anthropic app use, while developers building products or services with the Agent SDK should use API key authentication through Claude Console or a supported cloud provider. Do not use this extension to route Free, Pro, or Max subscription credentials on behalf of other users.
 >
 > Read-only/local features such as dashboard state, peer history browsing, local persistence, Git operations, and the experimental `codex-cli` runtime path are separate from Claude Agent SDK message sending.
 
@@ -11,7 +11,7 @@ Claude Code and Codex CLI are more than model endpoints. They are coding harness
 
 Pi stays in the brain seat — like a human coordinating multiple coding agents. It can start long-lived workers, hand them scoped tasks, wait for results, inspect what they did, and decide what happens next.
 
-Claude is the default and most complete path today. Codex works too, but is still experimental and not parity-complete.
+Claude is the default and most complete path today. `claude-cli` is available as an optional local CLI-backed Claude path. Codex works too, but is still experimental and not parity-complete.
 
 ## What it adds
 
@@ -64,7 +64,7 @@ Once peer mode is active, you can often ask for this in natural language instead
 
 ## Install
 
-Read the Agent SDK auth caveat at the top of this README before using the Claude-backed runtime path.
+Read the Claude Code auth caveat at the top of this README before using a Claude-backed runtime path.
 
 Install from npm:
 
@@ -101,13 +101,48 @@ pi install /absolute/path/to/pi-ca-leash
 
 `npm install` runs the workspace build through `prepare`, so local development and git-based installs have package `dist/` files available.
 
-Use Codex as the default runtime driver for newly started peers:
+Use another default runtime driver for newly started peers:
 
 ```bash
+PI_CLAUDE_RUNTIME_DRIVER=claude-cli pi
 PI_CLAUDE_RUNTIME_DRIVER=codex-cli pi
 ```
 
 Persisted peers keep their recorded driver.
+
+## Configuration
+
+Driver choice can be set per call, by environment, or by config file. Precedence is:
+
+1. explicit method/tool/command driver, such as `peer_start(..., driver: "claude-cli")` or `/peer start task | claude-cli`
+2. `PI_CLAUDE_RUNTIME_DRIVER`
+3. config file `defaultDriver`
+4. built-in default `claude-sdk`
+
+Config files are JSON and are merged in this order:
+
+1. global XDG config: `$XDG_CONFIG_HOME/pi-ca-leash/config.json`, or `~/.config/pi-ca-leash/config.json`
+2. repository-local config: `.pi-ca-leash/config.json`
+3. explicit override path from `PI_CA_LEASH_CONFIG`
+
+Example:
+
+```json
+{
+  "defaultDriver": "claude-cli",
+  "drivers": {
+    "claude-cli": {
+      "executable": "/opt/homebrew/bin/claude",
+      "permissionMode": "bypassPermissions"
+    },
+    "codex-cli": {
+      "executable": "/opt/homebrew/bin/codex"
+    }
+  }
+}
+```
+
+`claude-cli` runs local Claude Code in print mode (`claude -p --output-format stream-json`) and resumes follow-up peer messages with `--resume <session-id>`. `claude-sdk` remains available and is still the default unless you choose another driver.
 
 ## Try this first
 
@@ -122,9 +157,10 @@ Inside pi:
 /peer dashboard advanced
 ```
 
-If you want Codex-backed peers, inspect the bundled Codex catalog first:
+If you want driver-specific peers, inspect the bundled catalog first:
 
 ```text
+/peer models claude-cli
 /peer models codex-cli
 ```
 
@@ -156,7 +192,7 @@ Primary slash-command surface:
 /peer ask <name> | <message>
 /peer send <name> | <message>
 /peer list
-/peer models [claude-sdk|codex-cli] [all|advanced|verbose]
+/peer models [claude-sdk|claude-cli|codex-cli] [all|advanced|verbose]
 /peer history <name> [cursor] [limit]
 /peer interrupt <name>
 /peer stop <name>
@@ -229,8 +265,9 @@ Result: managed peers created by another extension can show up in the live `/pee
 
 Runtime driver notes:
 - `claude-sdk` is the default and most complete path
+- `claude-cli` shells out to local `claude -p --output-format stream-json`; it avoids importing the Agent SDK package, but still uses Claude Code non-interactively
 - `codex-cli` is supported, but still experimental and not parity-complete
-- `PI_CLAUDE_RUNTIME_DRIVER=codex-cli` changes the default for newly started peers
+- `PI_CLAUDE_RUNTIME_DRIVER=claude-cli` or `PI_CLAUDE_RUNTIME_DRIVER=codex-cli` changes the default for newly started peers
 - `/peer models` and LLM-callable `runtime_models` show a short recommended model list by default, including advisory use cases
 - `/peer models ... all` and `runtime_models(verbose: true)` expose the full bundled Lanista-derived model catalog
 - LLM-callable `peer_start`, `peer_ask`, and `peer_send` can pass explicit model ids
@@ -255,6 +292,7 @@ Useful docs that should remain current:
 - `ARCHITECTURE.md`
 - `KNOWN_LIMITS.md`
 - `CHANGELOG.md`
+- `RELEASE_NOTES.md`
 - `DEVELOPMENT.md`
 - `AGENTS.md`
 

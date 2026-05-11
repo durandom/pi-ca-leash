@@ -20,7 +20,7 @@ test("parseSubagentRunToolInput applies defaults and parses codex driver", () =>
 
 test("parseSubagentRunToolInput rejects missing task and invalid driver", () => {
   assert.throws(() => parseSubagentRunToolInput({}), /task required/);
-  assert.throws(() => parseSubagentRunToolInput({ task: "x", driver: "wat" }), /driver must be claude-sdk or codex-cli/);
+  assert.throws(() => parseSubagentRunToolInput({ task: "x", driver: "wat" }), /driver must be claude-sdk, claude-cli, or codex-cli/);
 });
 
 test("parseTeamSpawnToolInput trims strings and parses claude driver", () => {
@@ -41,5 +41,5 @@ test("parseTeamSpawnToolInput trims strings and parses claude driver", () => {
 
 test("parseTeamSpawnToolInput rejects missing required fields and invalid driver", () => {
   assert.throws(() => parseTeamSpawnToolInput({ name: "worker" }), /name and prompt required/);
-  assert.throws(() => parseTeamSpawnToolInput({ name: "worker", prompt: "hi", driver: "wat" }), /driver must be claude-sdk or codex-cli/);
+  assert.throws(() => parseTeamSpawnToolInput({ name: "worker", prompt: "hi", driver: "wat" }), /driver must be claude-sdk, claude-cli, or codex-cli/);
 });

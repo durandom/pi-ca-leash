@@ -61,7 +61,7 @@ export function parsePeerStartCommandInput(args: string): ParsedPeerStartCommand
     }
     const driver = parseRuntimeDriverName(parts[2]);
     if (!driver) {
-      throw new Error("driver must be claude-sdk or codex-cli when using a driver-aware peer start form");
+      throw new Error("driver must be claude-sdk, claude-cli, or codex-cli when using a driver-aware peer start form");
     }
     return {
       name: parts[0],
@@ -72,7 +72,7 @@ export function parsePeerStartCommandInput(args: string): ParsedPeerStartCommand
   }
   const driver = parseRuntimeDriverName(parts[2]);
   if (!driver) {
-    throw new Error("driver must be claude-sdk or codex-cli when using <name> | <prompt> | <driver> | <model>");
+    throw new Error("driver must be claude-sdk, claude-cli, or codex-cli when using <name> | <prompt> | <driver> | <model>");
   }
   return {
     name: parts[0],
@@ -94,7 +94,7 @@ export function parseSubagentRunCommandInput(args: string): ParsedSubagentRunCom
   }
   const driver = parseRuntimeDriverName(parts[0]);
   if (!driver) {
-    throw new Error("driver must be claude-sdk or codex-cli when using <driver> | <task>");
+    throw new Error("driver must be claude-sdk, claude-cli, or codex-cli when using <driver> | <task>");
   }
   return {
     driver,
@@ -116,7 +116,7 @@ export function parseTeamSpawnCommandInput(args: string): ParsedTeamSpawnCommand
   }
   const driver = parseRuntimeDriverName(maybeDriver);
   if (!driver) {
-    throw new Error("driver must be claude-sdk or codex-cli when using <name> | <prompt> | <driver>");
+    throw new Error("driver must be claude-sdk, claude-cli, or codex-cli when using <name> | <prompt> | <driver>");
   }
   return {
     name: name ?? "",

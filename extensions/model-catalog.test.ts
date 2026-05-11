@@ -4,6 +4,7 @@ import { describeModelSelection, findRuntimeModel, modelCatalogsForDriver, resol
 
 test("model catalog maps runtime drivers to Lanista provider snapshots", () => {
   const claude = modelCatalogsForDriver("claude-sdk")[0]!;
+  const claudeCli = modelCatalogsForDriver("claude-cli")[0]!;
   const codex = modelCatalogsForDriver("codex-cli")[0]!;
 
   assert.equal(claude.provider, "anthropic");
@@ -11,6 +12,9 @@ test("model catalog maps runtime drivers to Lanista provider snapshots", () => {
   assert.equal(claude.aliases.sonnet, "claude-sonnet-4-6");
   assert.deepEqual(claude.recommendations.map((entry) => entry.alias), ["opus", "sonnet", "haiku"]);
   assert.ok(findRuntimeModel("claude-sdk", "claude-sonnet-4-6"));
+  assert.equal(claudeCli.driver, "claude-cli");
+  assert.equal(claudeCli.provider, "anthropic");
+  assert.ok(findRuntimeModel("claude-cli", "claude-sonnet-4-6"));
 
   assert.equal(codex.provider, "openai-codex");
   assert.equal(codex.defaultModel, "gpt-5.5");
