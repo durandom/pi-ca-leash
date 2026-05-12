@@ -7,7 +7,12 @@ export function parseRuntimeDriverName(value: unknown): RuntimeDriverName | unde
     return undefined;
   }
   const trimmed = value.trim();
-  return trimmed === "claude-sdk" || trimmed === "claude-cli" || trimmed === "codex-cli" ? trimmed : undefined;
+  return trimmed === "claude-sdk" ||
+    trimmed === "claude-cli" ||
+    trimmed === "codex-cli" ||
+    trimmed === "pi-coding-agent"
+    ? trimmed
+    : undefined;
 }
 
 export interface ExtensionRuntimeDriverConfig {

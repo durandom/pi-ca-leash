@@ -13,7 +13,7 @@ export interface RuntimeModelCatalogEntry {
 
 export interface RuntimeDriverModelCatalog {
   driver: RuntimeDriverName;
-  provider: "anthropic" | "openai-codex";
+  provider: "anthropic" | "openai-codex" | "pi-ai";
   defaultModel: string;
   aliases: Record<string, string>;
   recommendations: RuntimeModelRecommendation[];
@@ -120,7 +120,12 @@ export function modelCatalogsForDriver(driver?: RuntimeDriverName): RuntimeDrive
   if (driver) {
     return [catalogForDriver(driver)];
   }
-  return [catalogForDriver("claude-sdk"), catalogForDriver("claude-cli"), catalogForDriver("codex-cli")];
+  return [
+    catalogForDriver("claude-sdk"),
+    catalogForDriver("claude-cli"),
+    catalogForDriver("codex-cli"),
+    catalogForDriver("pi-coding-agent"),
+  ];
 }
 
 export function findRuntimeModel(driver: RuntimeDriverName, model: string): RuntimeModelCatalogEntry | undefined {
@@ -177,6 +182,17 @@ function catalogForDriver(driver: RuntimeDriverName): RuntimeDriverModelCatalog 
       cli: "claude",
       flag: "claude -p --model <id>",
       source: `${base.source}; shared with claude-sdk catalog`,
+    };
+  }
+  if (driver === "pi-coding-agent") {
+    const base = RUNTIME_MODEL_CATALOGS["claude-sdk"]!;
+    return {
+      ...base,
+      driver,
+      provider: "pi-ai",
+      cli: "pi",
+      flag: "pi --model <provider>/<id>",
+      source: `${base.source}; shared with claude-sdk catalog (pi-coding-agent routes through pi-ai)`,
     };
   }
   return RUNTIME_MODEL_CATALOGS[driver]!;

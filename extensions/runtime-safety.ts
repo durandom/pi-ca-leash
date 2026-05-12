@@ -21,7 +21,15 @@ export function explainRuntimeFailure(message: string, driver?: string, model?: 
   }
 
   if (lower.includes("enoent") || lower.includes("spawn") && lower.includes("not found")) {
-    const binary = driver === "codex-cli" ? "codex" : driver === "claude-cli" ? "claude" : driver === "claude-sdk" ? "Claude Code" : "runtime";
+    const binary = driver === "codex-cli"
+      ? "codex"
+      : driver === "claude-cli"
+        ? "claude"
+        : driver === "claude-sdk"
+          ? "Claude Code"
+          : driver === "pi-coding-agent"
+            ? "pi-coding-agent (@earendil-works/pi-coding-agent)"
+            : "runtime";
     hints.push(`${binary} executable could not be spawned. Check PATH or configure the matching executable env var before starting peers.`);
   }
 

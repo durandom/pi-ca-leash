@@ -9,9 +9,9 @@
 That leads to a layered design.
 
 ```text
-Claude SDK driver (default)    Claude CLI driver (optional)    Codex CLI driver (experimental)
-             ↓                              ↓                              ↓
-                              packages/runtime
+Claude SDK driver (default)    Claude CLI    Codex CLI    pi-coding-agent
+             ↓                       ↓             ↓               ↓
+                                packages/runtime
                                      ↓
                           packages/intercom-bridge
                                      ↓
@@ -40,6 +40,11 @@ Current drivers:
 - `claude-sdk` is the default and most complete path.
 - `claude-cli` shells out to local `claude -p --output-format stream-json` and avoids importing `@anthropic-ai/claude-agent-sdk`.
 - `codex-cli` exists as an experimental runtime driver with a narrower supported option set.
+- `pi-coding-agent` wraps `@earendil-works/pi-coding-agent`'s `createAgentSession`, mapping `AgentSessionEvent` into the normalized driver stream. See `docs/pi-coding-agent-event-mapping.md`. No resume support yet — each `driver.run()` creates a fresh `AgentSession`.
+
+Token usage reporting:
+- runtime usage values are attached to individual `result` events and are not accumulated into session totals by runtime, bridge, subagent, teams, or dashboard code
+- see `docs/token-usage-reporting.md` for adapter and backend semantics
 
 Important consequence:
 - higher layers should not reinvent runtime session persistence or control semantics

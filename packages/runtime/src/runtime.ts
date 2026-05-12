@@ -15,6 +15,7 @@ import {
 import { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js";
 import { ClaudeCliDriver } from "./drivers/claude-cli.js";
 import { CodexCliDriver } from "./drivers/codex-cli.js";
+import { PiCodingAgentDriver } from "./drivers/pi-coding-agent.js";
 import { loadPiCaLeashConfigSync } from "./config.js";
 import type { NormalizedDriverMessageBlock } from "./drivers/messages.js";
 import type {
@@ -68,9 +69,11 @@ export class ClaudeCodeRuntime {
     const defaultCodexDriver = new CodexCliDriver({
       executable: config.drivers?.["codex-cli"]?.executable,
     });
+    const defaultPiCodingAgentDriver = new PiCodingAgentDriver();
     this.drivers.set(defaultClaudeDriver.name, defaultClaudeDriver);
     this.drivers.set(defaultClaudeCliDriver.name, defaultClaudeCliDriver);
     this.drivers.set(defaultCodexDriver.name, defaultCodexDriver);
+    this.drivers.set(defaultPiCodingAgentDriver.name, defaultPiCodingAgentDriver);
     if (options.drivers) {
       for (const driver of Object.values(options.drivers)) {
         if (driver) {

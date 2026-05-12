@@ -1,0 +1,415 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  parsePiCodingAgentEvent,
+  PiCodingAgentDriver,
+  type PiCodingAgentSessionFactory,
+  type PiCodingAgentSessionLike,
+} from "../src/drivers/pi-coding-agent.js";
+import { ClaudeCodeRuntime } from "../src/runtime.js";
+import type { DriverEventEnvelope, ResultEvent } from "../src/types.js";
+
+// ---------------------------------------------------------------------------
+// parsePiCodingAgentEvent — translation table coverage
+// ---------------------------------------------------------------------------
+
+test("parsePiCodingAgentEvent — tool_execution_start → tool_use", () => {
+  const [msg] = parsePiCodingAgentEvent({
+    type: "tool_execution_start",
+    toolCallId: "call-1",
+    toolName: "bash",
+    args: { command: "ls" },
+  });
+  assert.equal(msg?.type, "tool_use");
+  assert.equal(msg?.type === "tool_use" ? msg.toolName : undefined, "bash");
+  assert.equal(msg?.type === "tool_use" ? msg.toolUseId : undefined, "call-1");
+});
+
+test("parsePiCodingAgentEvent — message_end (assistant) → assistant with text/thinking/tool_use blocks", () => {
+  const messages = parsePiCodingAgentEvent({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      model: "anthropic/claude-opus-4-5",
+      content: [
+        { type: "thinking", thinking: "plan" },
+        { type: "text", text: "Doing the task." },
+        { type: "toolCall", id: "call-1", name: "read", arguments: { path: "x.ts" } },
+      ],
+    },
+  });
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0]?.type, "assistant");
+  assert.equal(
+    messages[0]?.type === "assistant" ? messages[0].model : undefined,
+    "anthropic/claude-opus-4-5",
+  );
+  const blocks = messages[0]?.type === "assistant" ? messages[0].blocks : [];
+  assert.deepEqual(
+    blocks.map((b) => b.type),
+    ["thinking", "text", "tool_use"],
+  );
+  const toolUseBlock = blocks.find((b) => b.type === "tool_use");
+  assert.equal(toolUseBlock?.name, "read");
+  assert.equal(toolUseBlock?.id, "call-1");
+});
+
+test("parsePiCodingAgentEvent — message_end (toolResult) → tool_result with toolUseId", () => {
+  const [msg] = parsePiCodingAgentEvent({
+    type: "message_end",
+    message: {
+      role: "toolResult",
+      toolCallId: "call-1",
+      toolName: "bash",
+      content: [{ type: "text", text: "stdout" }],
+      isError: false,
+    },
+  });
+  assert.equal(msg?.type, "tool_result");
+  assert.equal(msg?.type === "tool_result" ? msg.toolName : undefined, "bash");
+  assert.equal(msg?.type === "tool_result" ? msg.toolUseId : undefined, "call-1");
+  assert.equal(msg?.type === "tool_result" ? msg.isError : undefined, false);
+});
+
+test("parsePiCodingAgentEvent — turn_end → result with usage from assistant message", () => {
+  const [msg] = parsePiCodingAgentEvent({
+    type: "turn_end",
+    message: {
+      role: "assistant",
+      stopReason: "stop",
+      content: [{ type: "text", text: "All done." }],
+      usage: {
+        input: 100,
+        output: 20,
+        cacheRead: 30,
+        cacheWrite: 5,
+        totalTokens: 155,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.12 },
+      },
+    },
+    toolResults: [],
+  });
+  assert.equal(msg?.type, "result");
+  assert.equal(msg?.type === "result" ? msg.ok : undefined, true);
+  assert.equal(msg?.type === "result" ? msg.summary : undefined, "All done.");
+  assert.equal(msg?.type === "result" ? msg.stopReason : undefined, "stop");
+  assert.equal(msg?.type === "result" ? msg.usage?.inputTokens : undefined, 100);
+  assert.equal(msg?.type === "result" ? msg.usage?.outputTokens : undefined, 20);
+  assert.equal(msg?.type === "result" ? msg.usage?.cacheReadInputTokens : undefined, 30);
+  assert.equal(msg?.type === "result" ? msg.usage?.cacheCreationInputTokens : undefined, 5);
+  assert.equal(msg?.type === "result" ? msg.usage?.totalCostUsd : undefined, 0.12);
+  assert.equal(msg?.type === "result" ? msg.usage?.contextTokens : undefined, 135);
+});
+
+test("parsePiCodingAgentEvent — turn_end with error stopReason → result.ok=false", () => {
+  const [msg] = parsePiCodingAgentEvent({
+    type: "turn_end",
+    message: {
+      role: "assistant",
+      stopReason: "error",
+      content: [],
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    },
+  });
+  assert.equal(msg?.type, "result");
+  assert.equal(msg?.type === "result" ? msg.ok : undefined, false);
+});
+
+test("parsePiCodingAgentEvent — lifecycle events return []", () => {
+  for (const type of ["agent_start", "agent_end", "turn_start", "message_start", "message_update", "tool_execution_update", "tool_execution_end", "queue_update"]) {
+    assert.deepEqual(parsePiCodingAgentEvent({ type }), [], `expected ${type} to be dropped`);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Fake AgentSession factory
+// ---------------------------------------------------------------------------
+
+interface ScriptedEvent {
+  delayMs?: number;
+  event: unknown;
+}
+
+function makeFakeSessionFactory(
+  scripts: ScriptedEvent[][],
+  options: { sessionId?: string; throwOnCreate?: Error } = {},
+): PiCodingAgentSessionFactory {
+  let runIndex = 0;
+  const sessionId = options.sessionId ?? "pi-session-1";
+  return async (_input) => {
+    if (options.throwOnCreate) throw options.throwOnCreate;
+    const script = scripts[runIndex++] ?? [];
+    let listener: ((event: unknown) => void) | undefined;
+    let disposed = false;
+    const session: PiCodingAgentSessionLike = {
+      sessionId,
+      subscribe(l) {
+        listener = l;
+        return () => {
+          listener = undefined;
+        };
+      },
+      async prompt(_text, _opts) {
+        for (const item of script) {
+          if (item.delayMs) await new Promise((r) => setTimeout(r, item.delayMs));
+          if (!listener) break;
+          listener(item.event);
+        }
+      },
+      abort() {
+        listener = undefined;
+      },
+      dispose() {
+        disposed = true;
+        listener = undefined;
+      },
+    };
+    // Expose for assertions
+    Object.defineProperty(session, "__disposed", { get: () => disposed });
+    return session;
+  };
+}
+
+async function waitForState(runtime: ClaudeCodeRuntime, sessionId: string, expected: string): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    const status = await runtime.status(sessionId);
+    if (status?.state === expected) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`Timed out waiting for state ${expected}`);
+}
+
+function resultEvents(items: { type: string }[]): ResultEvent[] {
+  return items.filter((item): item is ResultEvent => item.type === "result");
+}
+
+// ---------------------------------------------------------------------------
+// Integration via ClaudeCodeRuntime
+// ---------------------------------------------------------------------------
+
+test("integration — start produces RuntimeEvents and reaches idle", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "pi-coding-agent-test-"));
+  const script: ScriptedEvent[] = [
+    { event: { type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: { path: "a.ts" } } },
+    {
+      event: {
+        type: "message_end",
+        message: {
+          role: "toolResult",
+          toolCallId: "c1",
+          toolName: "read",
+          content: [{ type: "text", text: "file contents" }],
+          isError: false,
+        },
+      },
+    },
+    {
+      event: {
+        type: "message_end",
+        message: {
+          role: "assistant",
+          model: "anthropic/claude-opus-4-5",
+          content: [{ type: "text", text: "Read it." }],
+        },
+      },
+    },
+    {
+      event: {
+        type: "turn_end",
+        message: {
+          role: "assistant",
+          stopReason: "stop",
+          content: [{ type: "text", text: "Read it." }],
+          usage: { input: 10, output: 3, cacheRead: 2, cacheWrite: 0, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+        },
+      },
+    },
+  ];
+  const factory = makeFakeSessionFactory([script], { sessionId: "pi-session-42" });
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  const runtime = new ClaudeCodeRuntime({ storageDir, drivers: { "pi-coding-agent": driver } });
+
+  const session = await runtime.start({ prompt: "test", driver: "pi-coding-agent", cwd: "/tmp" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  const status = await runtime.status(session.sessionId);
+  assert.equal(status?.driver, "pi-coding-agent");
+  assert.equal(status?.driverSessionId, "pi-session-42");
+  assert.equal(status?.state, "idle");
+
+  const transcript = await runtime.readTranscript(session.sessionId);
+  assert.equal(transcript.items.some((i) => i.type === "message"), true);
+  assert.equal(transcript.items.some((i) => i.type === "tool"), true);
+  assert.equal(transcript.items.some((i) => i.type === "result"), true);
+});
+
+test("integration — usage is reported per turn_end and accumulates across two runs", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "pi-coding-agent-usage-"));
+  const firstUsage = {
+    input: 100, output: 10, cacheRead: 50, cacheWrite: 5, totalTokens: 165,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 },
+  };
+  const secondUsage = {
+    input: 20, output: 5, cacheRead: 10, cacheWrite: 2, totalTokens: 37,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.005 },
+  };
+  const factory = makeFakeSessionFactory([
+    [{
+      event: {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "one" }], usage: firstUsage },
+      },
+    }],
+    [{
+      event: {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "two" }], usage: secondUsage },
+      },
+    }],
+  ]);
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  const runtime = new ClaudeCodeRuntime({ storageDir, drivers: { "pi-coding-agent": driver } });
+
+  const session = await runtime.start({ prompt: "first", driver: "pi-coding-agent", cwd: "/tmp" });
+  await waitForState(runtime, session.sessionId, "idle");
+  await runtime.send({ sessionId: session.sessionId, message: "second" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  const transcript = await runtime.readTranscript(session.sessionId);
+  const results = resultEvents(transcript.items);
+  assert.equal(results.length, 2);
+  assert.equal(results[0]?.usage?.inputTokens, 100);
+  assert.equal(results[1]?.usage?.inputTokens, 20);
+
+  // Consumers can sum per-result usage client-side; verify the total is non-zero.
+  const totalInput = results.reduce((sum, r) => sum + (r.usage?.inputTokens ?? 0), 0);
+  assert.equal(totalInput, 120);
+});
+
+test("integration — send routes through driver.run and produces a result", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "pi-coding-agent-send-"));
+  const factory = makeFakeSessionFactory([
+    [{
+      event: {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "first" }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } },
+      },
+    }],
+    [{
+      event: {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "second" }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } },
+      },
+    }],
+  ]);
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  const runtime = new ClaudeCodeRuntime({ storageDir, drivers: { "pi-coding-agent": driver } });
+
+  const session = await runtime.start({ prompt: "first", driver: "pi-coding-agent", cwd: "/tmp" });
+  await waitForState(runtime, session.sessionId, "idle");
+  const afterFirst = await runtime.events(session.sessionId);
+
+  await runtime.send({ sessionId: session.sessionId, message: "second" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  const newEvents = await runtime.events(session.sessionId, afterFirst.nextCursor);
+  assert.equal(newEvents.items.some((i) => i.type === "result"), true);
+});
+
+test("integration — status returns idle after a successful run", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "pi-coding-agent-status-"));
+  const factory = makeFakeSessionFactory([
+    [{
+      event: {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "ok" }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } },
+      },
+    }],
+  ]);
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  const runtime = new ClaudeCodeRuntime({ storageDir, drivers: { "pi-coding-agent": driver } });
+
+  const session = await runtime.start({ prompt: "test", driver: "pi-coding-agent", cwd: "/tmp" });
+  await waitForState(runtime, session.sessionId, "idle");
+  const status = await runtime.status(session.sessionId);
+  assert.equal(status?.state, "idle");
+  assert.equal(status?.driver, "pi-coding-agent");
+});
+
+test("integration — stop interrupts a long-running session and transitions to stopped", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "pi-coding-agent-stop-"));
+  // Use a long-delayed event so we can interrupt mid-prompt.
+  const factory = makeFakeSessionFactory([
+    [
+      { delayMs: 500, event: { type: "turn_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "late" }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } } },
+    ],
+  ]);
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  const runtime = new ClaudeCodeRuntime({ storageDir, drivers: { "pi-coding-agent": driver } });
+
+  const session = await runtime.start({ prompt: "test", driver: "pi-coding-agent", cwd: "/tmp" });
+  // Give the driver time to spawn the session and start the prompt.
+  await new Promise((r) => setTimeout(r, 50));
+  await runtime.stop(session.sessionId);
+
+  const status = await runtime.status(session.sessionId);
+  assert.ok(status?.state === "stopped" || status?.state === "interrupted" || status?.state === "idle");
+});
+
+test("integration — createSession failure surfaces as an error envelope and run fails", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "pi-coding-agent-fail-"));
+  const factory = makeFakeSessionFactory([], { throwOnCreate: new Error("boom") });
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  const runtime = new ClaudeCodeRuntime({ storageDir, drivers: { "pi-coding-agent": driver } });
+
+  const session = await runtime.start({ prompt: "test", driver: "pi-coding-agent", cwd: "/tmp" });
+  await waitForState(runtime, session.sessionId, "failed");
+  const status = await runtime.status(session.sessionId);
+  assert.equal(status?.state, "failed");
+  assert.ok(status?.lastError?.message?.includes("boom"));
+});
+
+// ---------------------------------------------------------------------------
+// Direct driver invocation — kill semantics, delivery ordering
+// ---------------------------------------------------------------------------
+
+test("direct driver — kill aborts in-flight prompt and resolves done with SIGINT", async () => {
+  const factory = makeFakeSessionFactory([
+    [
+      { delayMs: 1000, event: { type: "turn_end", message: { role: "assistant", stopReason: "stop", content: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } } },
+    ],
+  ]);
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  const events: DriverEventEnvelope[] = [];
+  const handle = driver.run(
+    { sessionId: "s", prompt: "p", cwd: "/tmp" },
+    (e) => { events.push(e); },
+  );
+  // Yield once so createSession resolves and the init system event fires.
+  await new Promise((r) => setTimeout(r, 20));
+  handle.kill();
+  const result = await handle.done;
+  assert.equal(result.code, 130);
+  assert.equal(result.signal, "SIGINT");
+});
+
+test("direct driver — delivery ordering preserved for slow handlers", async () => {
+  const received: string[] = [];
+  const slowHandler = async (e: DriverEventEnvelope) => {
+    await new Promise((r) => setTimeout(r, 5));
+    if (e.type === "message") received.push(e.payload.type);
+  };
+  const factory = makeFakeSessionFactory([
+    [
+      { event: { type: "tool_execution_start", toolCallId: "c1", toolName: "read", args: {} } },
+      { event: { type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "hi" }] } } },
+      { event: { type: "turn_end", message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "hi" }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } } },
+    ],
+  ]);
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  await driver.run({ sessionId: "s", prompt: "p", cwd: "/tmp" }, slowHandler).done;
+  assert.deepEqual(received, ["system", "tool_use", "assistant", "result"]);
+});

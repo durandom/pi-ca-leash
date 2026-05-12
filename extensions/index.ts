@@ -78,7 +78,7 @@ const EXTENSION_VERSION = String((extensionRequire("../package.json") as { versi
 const STATE_DIR_NAME = ".pi-ca-leash";
 const BACKGROUND_POLL_INTERVAL_MS = 5_000;
 const BACKGROUND_REFRESH_MIN_INTERVAL_MS = 3_000;
-const RUNTIME_DRIVER_ENUM = ["claude-sdk", "claude-cli", "codex-cli"] as const;
+const RUNTIME_DRIVER_ENUM = ["claude-sdk", "claude-cli", "codex-cli", "pi-coding-agent"] as const;
 const RUNTIME_DRIVER_USAGE = "claude-sdk, claude-cli, or codex-cli";
 const DEFAULT_SNOOZE_MINUTES = 15;
 
@@ -3181,6 +3181,8 @@ function compactDriver(driver: string): string {
       return "claude";
     case "codex-cli":
       return "codex";
+    case "pi-coding-agent":
+      return "pi-ca";
     default:
       return driver.length > 7 ? `${driver.slice(0, 6)}…` : driver;
   }

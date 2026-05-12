@@ -1,7 +1,7 @@
 import type { NormalizedDriverMessage } from "./drivers/messages.js";
 
 export type RuntimeSessionId = string;
-export type RuntimeDriverName = "claude-sdk" | "claude-cli" | "codex-cli";
+export type RuntimeDriverName = "claude-sdk" | "claude-cli" | "codex-cli" | "pi-coding-agent";
 
 export type RuntimeSessionState =
   | "starting"

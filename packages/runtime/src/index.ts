@@ -4,6 +4,14 @@ export { PI_CA_LEASH_CONFIG_ENV, defaultConfigPaths, loadPiCaLeashConfigSync, re
 export { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js";
 export { ClaudeCliDriver, buildClaudeCliCommand } from "./drivers/claude-cli.js";
 export { CodexCliDriver, parseCodexCliEvent, buildCodexCliCommand } from "./drivers/codex-cli.js";
+export {
+  PiCodingAgentDriver,
+  parsePiCodingAgentEvent,
+  type PiCodingAgentDriverOptions,
+  type PiCodingAgentSessionFactory,
+  type PiCodingAgentSessionFactoryInput,
+  type PiCodingAgentSessionLike,
+} from "./drivers/pi-coding-agent.js";
 export type { NormalizedDriverMessage } from "./drivers/messages.js";
 export type {
   DriverEventEnvelope,
