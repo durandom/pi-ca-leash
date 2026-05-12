@@ -11,7 +11,7 @@ import {
   CodexCliDriver,
 } from "../src/drivers/codex-cli.js";
 import { ClaudeCodeRuntime } from "../src/runtime.js";
-import type { DriverEventEnvelope } from "../src/types.js";
+import type { DriverEventEnvelope, ResultEvent } from "../src/types.js";
 
 // ---------------------------------------------------------------------------
 // buildCodexCliCommand
@@ -24,7 +24,7 @@ test("buildCodexCliCommand — fresh run", () => {
 
 test("buildCodexCliCommand — resume run", () => {
   const args = buildCodexCliCommand({ prompt: "continue", cwd: "/work", resumeSessionId: "sid-abc" });
-  assert.deepEqual(args, ["exec", "resume", "--json", "--full-auto", "-C", "/work", "sid-abc", "continue"]);
+  assert.deepEqual(args, ["exec", "resume", "--json", "--full-auto", "sid-abc", "continue"]);
 });
 
 test("buildCodexCliCommand — bypassPermissions disables Codex sandbox", () => {
@@ -55,8 +55,6 @@ test("buildCodexCliCommand — bypassPermissions is preserved on resume", () => 
     "resume",
     "--json",
     "--dangerously-bypass-approvals-and-sandbox",
-    "-C",
-    "/work",
     "sid-abc",
     "continue",
   ]);
@@ -172,6 +170,18 @@ function makeFakeSpawn(lines: string[], exitCode = 0) {
   } as unknown as typeof import("node:child_process").spawn;
 }
 
+function makeSequentialFakeSpawn(runs: string[][], exitCode = 0) {
+  let index = 0;
+  return function fakeSpawn(_cmd: string, _args: string[], _opts: unknown) {
+    const lines = runs[index++] ?? [];
+    return makeFakeSpawn(lines, exitCode)(_cmd, _args, _opts);
+  } as unknown as typeof import("node:child_process").spawn;
+}
+
+function resultEvents(items: { type: string }[]): ResultEvent[] {
+  return items.filter((item): item is ResultEvent => item.type === "result");
+}
+
 // ---------------------------------------------------------------------------
 // Integration: fake subprocess → ClaudeCodeRuntime
 // ---------------------------------------------------------------------------
@@ -208,6 +218,124 @@ test("integration — fake subprocess produces expected RuntimeEvents", async ()
   assert.equal(hasMessage, true, "transcript should have a message event");
   assert.equal(hasResult, true, "transcript should have a result event");
   assert.equal(status?.state, "idle");
+});
+
+test("integration — one turn.completed usage event is reported exactly for a fresh run", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "codex-test-"));
+  const usage = {
+    input_tokens: 101,
+    cached_input_tokens: 70,
+    output_tokens: 11,
+    reasoning_output_tokens: 3,
+  };
+  const lines = [
+    JSON.stringify({ type: "thread.started", thread_id: "codex-fresh-usage" }),
+    JSON.stringify({ type: "turn.completed", summary: "fresh done", usage }),
+  ];
+  const driver = new CodexCliDriver({ spawn: makeFakeSpawn(lines, 0) });
+  const runtime = new ClaudeCodeRuntime({ storageDir, drivers: { "codex-cli": driver } });
+
+  const session = await runtime.start({ prompt: "test", driver: "codex-cli", cwd: "/tmp" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  const transcript = await runtime.readTranscript(session.sessionId);
+  const results = resultEvents(transcript.items);
+  assert.equal(results.length, 1);
+  assert.equal(results[0]?.usage?.inputTokens, 101);
+  assert.equal(results[0]?.usage?.cacheReadInputTokens, 70);
+  assert.equal(results[0]?.usage?.outputTokens, 11);
+  assert.equal(results[0]?.usage?.reasoningOutputTokens, 3);
+  assert.deepEqual(results[0]?.usage?.raw, usage);
+});
+
+test("integration — resumed send reports only the new turn.completed usage", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "codex-test-"));
+  const oldUsage = {
+    input_tokens: 1000,
+    cached_input_tokens: 800,
+    output_tokens: 100,
+    reasoning_output_tokens: 50,
+  };
+  const newUsage = {
+    input_tokens: 21,
+    cached_input_tokens: 18,
+    output_tokens: 7,
+    reasoning_output_tokens: 2,
+  };
+  const spawn = makeSequentialFakeSpawn([
+    [
+      JSON.stringify({ type: "thread.started", thread_id: "codex-resume-usage" }),
+      JSON.stringify({ type: "turn.completed", summary: "old done", usage: oldUsage }),
+    ],
+    [
+      JSON.stringify({ type: "thread.started", thread_id: "codex-resume-usage" }),
+      JSON.stringify({ type: "turn.completed", summary: "new done", usage: newUsage }),
+    ],
+  ]);
+  const driver = new CodexCliDriver({ spawn });
+  const runtime = new ClaudeCodeRuntime({ storageDir, drivers: { "codex-cli": driver } });
+
+  const session = await runtime.start({ prompt: "first", driver: "codex-cli", cwd: "/tmp" });
+  await waitForState(runtime, session.sessionId, "idle");
+  const afterFirstRun = await runtime.events(session.sessionId);
+
+  await runtime.send({ sessionId: session.sessionId, message: "second" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  const newEvents = await runtime.events(session.sessionId, afterFirstRun.nextCursor);
+  const newResults = resultEvents(newEvents.items);
+  assert.equal(newResults.length, 1);
+  assert.equal(newResults[0]?.usage?.inputTokens, 21);
+  assert.equal(newResults[0]?.usage?.cacheReadInputTokens, 18);
+  assert.equal(newResults[0]?.usage?.outputTokens, 7);
+  assert.equal(newResults[0]?.usage?.reasoningOutputTokens, 2);
+  assert.deepEqual(newResults[0]?.usage?.raw, newUsage);
+
+  const transcript = await runtime.readTranscript(session.sessionId);
+  const allResults = resultEvents(transcript.items);
+  assert.equal(allResults.length, 2);
+  assert.equal(allResults[0]?.usage?.inputTokens, 1000);
+  assert.equal(allResults[1]?.usage?.inputTokens, 21);
+});
+
+test("integration — multiple turn.completed events are emitted separately without summing usage", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "codex-test-"));
+  const firstUsage = {
+    input_tokens: 1,
+    cached_input_tokens: 2,
+    output_tokens: 3,
+    reasoning_output_tokens: 4,
+  };
+  const secondUsage = {
+    input_tokens: 10,
+    cached_input_tokens: 20,
+    output_tokens: 30,
+    reasoning_output_tokens: 40,
+  };
+  const lines = [
+    JSON.stringify({ type: "thread.started", thread_id: "codex-multi-usage" }),
+    JSON.stringify({ type: "turn.completed", summary: "first", usage: firstUsage }),
+    JSON.stringify({ type: "turn.completed", summary: "second", usage: secondUsage }),
+  ];
+  const driver = new CodexCliDriver({ spawn: makeFakeSpawn(lines, 0) });
+  const runtime = new ClaudeCodeRuntime({ storageDir, drivers: { "codex-cli": driver } });
+
+  const session = await runtime.start({ prompt: "test", driver: "codex-cli", cwd: "/tmp" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  const transcript = await runtime.readTranscript(session.sessionId);
+  const results = resultEvents(transcript.items);
+  assert.equal(results.length, 2);
+  assert.equal(results[0]?.summary, "first");
+  assert.equal(results[0]?.usage?.inputTokens, 1);
+  assert.equal(results[0]?.usage?.cacheReadInputTokens, 2);
+  assert.equal(results[0]?.usage?.outputTokens, 3);
+  assert.equal(results[0]?.usage?.reasoningOutputTokens, 4);
+  assert.equal(results[1]?.summary, "second");
+  assert.equal(results[1]?.usage?.inputTokens, 10);
+  assert.equal(results[1]?.usage?.cacheReadInputTokens, 20);
+  assert.equal(results[1]?.usage?.outputTokens, 30);
+  assert.equal(results[1]?.usage?.reasoningOutputTokens, 40);
 });
 
 // ---------------------------------------------------------------------------

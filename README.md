@@ -144,6 +144,17 @@ Example:
 
 `claude-cli` runs local Claude Code in print mode (`claude -p --output-format stream-json`) and resumes follow-up peer messages with `--resume <session-id>`. `claude-sdk` remains available and is still the default unless you choose another driver.
 
+## SDK Usage
+
+This repo also ships reusable SDK packages for programmatic use:
+
+- `@pi-claude-code-agent/runtime` for driver-backed sessions, status, events, transcripts, and normalized result usage
+- `@pi-claude-code-agent/intercom-bridge` for named long-lived peers and managed-peer orchestration
+- `@pi-claude-code-agent/subagents-backend` for persisted bounded local runs
+- `@pi-claude-code-agent/teams-backend` for persistent local teammate records
+
+Token usage is exposed as per-result-event data, not as an automatic session total. SDK consumers should sum selected `RuntimeEvent.type === "result"` events themselves when they need cumulative accounting. See `docs/token-usage-reporting.md` for the adapter/backend matrix and example SDK summing pattern.
+
 ## Try this first
 
 Inside pi:
