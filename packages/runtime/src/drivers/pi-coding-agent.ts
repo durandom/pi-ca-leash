@@ -232,16 +232,28 @@ async function defaultCreateSession(
       `pi-coding-agent driver requires @earendil-works/pi-coding-agent. ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const { createAgentSession, AuthStorage, ModelRegistry } = sdk;
+  const { createAgentSession, AuthStorage, ModelRegistry, SessionManager } = sdk;
   const modelRegistry = input.model ? ModelRegistry.create(AuthStorage.create()) : undefined;
   const model = input.model && modelRegistry ? resolvePiModel(modelRegistry, input.model) : undefined;
+  // When the runtime hands us a resumeSessionId, restore the most recent
+  // SDK session for this cwd so subsequent prompts inherit the prior
+  // conversation history. The SDK keys session files by cwd-encoded path
+  // under ~/.pi/agent/sessions/, and pi-ca-leash peers have a stable cwd
+  // per peer name — so continueRecent(cwd) reliably picks the right one.
+  const sessionManager = input.resumeSessionId
+    ? SessionManager.continueRecent(input.cwd)
+    : undefined;
   const { session } = await createAgentSession({
     cwd: input.cwd,
     tools: input.tools ?? DEFAULT_TOOLS,
     model,
     modelRegistry,
     thinkingLevel: defaultThinkingLevel,
-    sessionStartEvent: { type: "session_start", reason: "startup" },
+    sessionManager,
+    sessionStartEvent: {
+      type: "session_start",
+      reason: input.resumeSessionId ? "resume" : "startup",
+    },
   });
   return session as PiCodingAgentSessionLike;
 }

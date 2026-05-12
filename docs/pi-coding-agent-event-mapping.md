@@ -61,14 +61,25 @@ and `sessionId = session.sessionId` immediately after `createAgentSession`
 resolves, so the runtime can record the driver session id the same way
 it does for the other drivers.
 
+## Session continuation
+
+When `RuntimeDriverRunInput.resumeSessionId` is truthy the driver passes
+`sessionManager: SessionManager.continueRecent(input.cwd)` to
+`createAgentSession`. The SDK's `SessionManager` keys session files by
+cwd-encoded path under `~/.pi/agent/sessions/`, and pi-ca-leash peers
+hold a stable cwd per peer name, so `continueRecent(cwd)` reliably picks
+the most recent prior session for that peer. `sessionStartEvent.reason`
+flips to `"resume"` so the SDK extension surface sees the correct
+lifecycle signal.
+
+The runtime's `send(peerName, ...)` path already forwards the persisted
+`driverSessionId` as `resumeSessionId`, so multi-turn conversation
+history is preserved across `send()` calls without any caller-side
+change. Consumers that want a fresh session launch a peer with a
+distinct `cwd` (or wipe the session dir).
+
 ## Known limitations
 
-- **No resume.** Each `driver.run()` call creates a fresh
-  `AgentSession`. `RuntimeDriverRunInput.resumeSessionId` is accepted
-  but ignored. Multi-turn conversation continuity through the runtime's
-  `send()` therefore starts a new pi-coding-agent session per send.
-  Resume support would require wiring `sessionManager` continuation
-  into the SDK call — left as a follow-up.
 - **Model resolution.** Bare model ids (e.g. `claude-opus-4-5`) are
   looked up via `ModelRegistry.getAll()`. Use `<provider>/<id>`
   (e.g. `anthropic/claude-opus-4-5`) for non-Anthropic providers or to

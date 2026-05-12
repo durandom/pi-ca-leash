@@ -289,6 +289,65 @@ test("integration — usage is reported per turn_end and accumulates across two 
   assert.equal(totalInput, 120);
 });
 
+test("integration — send forwards driverSessionId as resumeSessionId so the SDK can continue prior history", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "pi-coding-agent-resume-"));
+  const seenInputs: Array<{ resumeSessionId?: string }> = [];
+  const scripts: ScriptedEvent[][] = [
+    [{
+      event: {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "one" }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } },
+      },
+    }],
+    [{
+      event: {
+        type: "turn_end",
+        message: { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "two" }], usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } },
+      },
+    }],
+  ];
+  let runIndex = 0;
+  const factory: PiCodingAgentSessionFactory = async (input) => {
+    seenInputs.push({ resumeSessionId: input.resumeSessionId });
+    const script = scripts[runIndex++] ?? [];
+    let listener: ((event: unknown) => void) | undefined;
+    return {
+      sessionId: "pi-session-resume",
+      subscribe(l) {
+        listener = l;
+        return () => {
+          listener = undefined;
+        };
+      },
+      async prompt(_text, _opts) {
+        for (const item of script) {
+          if (!listener) break;
+          listener(item.event);
+        }
+      },
+      async abort() {},
+      dispose() {},
+      get state() {
+        return { messages: [] };
+      },
+    } as PiCodingAgentSessionLike;
+  };
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  const runtime = new ClaudeCodeRuntime({ storageDir, drivers: { "pi-coding-agent": driver } });
+
+  const session = await runtime.start({ prompt: "first", driver: "pi-coding-agent", cwd: "/tmp" });
+  await waitForState(runtime, session.sessionId, "idle");
+  await runtime.send({ sessionId: session.sessionId, message: "second" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  // First createSession invocation is a fresh start (no resumeSessionId).
+  // Second one carries the persisted driverSessionId so the driver can
+  // hand it to SessionManager.continueRecent.
+  assert.equal(seenInputs.length, 2);
+  assert.equal(seenInputs[0]?.resumeSessionId, undefined);
+  assert.equal(seenInputs[1]?.resumeSessionId, "pi-session-resume");
+});
+
 test("integration — send routes through driver.run and produces a result", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "pi-coding-agent-send-"));
   const factory = makeFakeSessionFactory([
