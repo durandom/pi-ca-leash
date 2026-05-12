@@ -41,7 +41,7 @@ export function buildCodexCliCommand(input: {
       ? "--dangerously-bypass-approvals-and-sandbox"
       : "--full-auto";
   if (input.resumeSessionId) {
-    args.push("resume", "--json", automationFlag, "-C", input.cwd);
+    args.push("resume", "--json", automationFlag);
     if (input.model) {
       args.push("-m", input.model);
     }
@@ -209,6 +209,7 @@ export class CodexCliDriver implements RuntimeDriver {
     let aborted = false;
 
     const child: ChildProcess = this.spawnFn(this.executable, args, {
+      cwd: input.cwd,
       env,
       stdio: ["ignore", "pipe", "pipe"],
     });
