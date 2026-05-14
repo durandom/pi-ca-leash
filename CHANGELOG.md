@@ -5,6 +5,7 @@ All notable changes to this repository should be recorded here.
 ## Unreleased
 
 ### Changed
+- Added `/peer dashboard hide|show` plus `/peer hide|show` aliases so operators can clear or restore the compact Peers widget without stopping peers or disabling completion relays.
 - Added an optional `claude-cli` runtime driver that shells out to local `claude -p --output-format stream-json`, preserves the existing `claude-sdk` driver, and supports resumed peer follow-up sends via Claude Code session ids.
 - Added pi-ca-leash JSON config loading from XDG global config, repository-local `.pi-ca-leash/config.json`, and optional `PI_CA_LEASH_CONFIG`, with explicit tool/command driver parameters and `PI_CLAUDE_RUNTIME_DRIVER` taking precedence for driver selection.
 - Mapped `codex-cli` `permissionMode: "bypassPermissions"` to Codex's unsandboxed exec flag for fresh and resumed peer runs.

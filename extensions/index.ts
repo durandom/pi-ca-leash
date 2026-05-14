@@ -144,6 +144,7 @@ interface ExtensionLogEntryInput {
 let dashboardContextRef: ExtensionContext | ExtensionCommandContext | undefined;
 let operatorContextRef: ExtensionContext | ExtensionCommandContext | undefined;
 let lastWidgetSignature: string | undefined;
+let peerDashboardHidden = false;
 
 export default async function piCaLeashExtension(pi: ExtensionAPI) {
   const cwd = process.cwd();
@@ -1542,7 +1543,21 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
 
   async function handleDashboardCommand(args: string, ctx: ExtensionCommandContext, command: string): Promise<void> {
     await activatePeerMode(ctx, { command, reason: "Peer mode activated" });
-    const advanced = args.trim().toLowerCase() === "advanced";
+    const normalizedArgs = args.trim().toLowerCase();
+    if (["hide", "off", "close", "clear", "minimize", "minimise"].includes(normalizedArgs)) {
+      peerDashboardHidden = true;
+      ctx.ui.setWidget("peer-dashboard", undefined);
+      ctx.ui.notify("Peers widget hidden. Use /peer dashboard show to restore it.", "info");
+      return;
+    }
+    if (["show", "on", "open", "restore"].includes(normalizedArgs)) {
+      peerDashboardHidden = false;
+      lastWidgetSignature = undefined;
+      const data = await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger, "Peers widget restored");
+      ctx.ui.notify(`Peers widget restored (${data.peers.length} peer${data.peers.length === 1 ? "" : "s"}).`, "info");
+      return;
+    }
+    const advanced = normalizedArgs === "advanced";
     await syncAttentionLedger();
     const data = await refreshDashboard(ctx, runtime, bridge, subagents, teams, dashboardState, attentionLedger);
     const health = getPeerFirstHealth(data.snapshot.peerRows, data.snapshot.transportDegraded);
@@ -1941,7 +1956,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
     });
   }
 
-  registerExtensionCommand(pi, "peer", "Peer dashboard and controls. Args: [about|init|dashboard|start|ask|send|list|models|history|interrupt|stop] ...", async (args, ctx) => {
+  registerExtensionCommand(pi, "peer", "Peer dashboard and controls. Args: [about|init|dashboard [hide|show|advanced]|start|ask|send|list|models|history|interrupt|stop] ...", async (args, ctx) => {
     const trimmed = args.trim();
     if (!trimmed) {
       await activatePeerMode(ctx, { command: "peer", showGuide: true, reason: "Peer mode activated" });
@@ -1967,6 +1982,16 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
       case "dashboard":
         await activatePeerMode(ctx, { command: "peer dashboard", showGuide: true, reason: "Peer mode activated" });
         await handleDashboardCommand(rest, ctx, "peer dashboard");
+        return;
+      case "hide":
+      case "minimize":
+      case "minimise":
+        await activatePeerMode(ctx, { command: "peer dashboard hide", showGuide: true, reason: "Peer mode activated" });
+        await handleDashboardCommand("hide", ctx, "peer dashboard hide");
+        return;
+      case "show":
+        await activatePeerMode(ctx, { command: "peer dashboard show", showGuide: true, reason: "Peer mode activated" });
+        await handleDashboardCommand("show", ctx, "peer dashboard show");
         return;
       case "start":
         await activatePeerMode(ctx, { command: "peer start", showGuide: true, reason: "Peer mode activated" });
@@ -2428,6 +2453,10 @@ async function refreshDashboard(
 
   if (!process.argv.includes("--no-session")) {
     ctx.ui.setStatus(EXTENSION_NAME, undefined);
+    if (peerDashboardHidden) {
+      ctx.ui.setWidget("peer-dashboard", undefined);
+      return data;
+    }
     const newSignature = computeWidgetSignature({
       peerRows: data.snapshot.peerRows.filter(isPeerVisibleInWidget),
       transportDegraded: data.snapshot.transportDegraded,

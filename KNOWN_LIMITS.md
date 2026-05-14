@@ -81,6 +81,7 @@ This file is intentionally blunt.
 15. **Default peer UX is intentionally compressed.**
     - The main window does not stream live peer transcript output.
     - Peer completion is relayed back as one wrapped follow-up turn instead of live transcript spam.
+    - `/peer dashboard hide` and `/peer hide` suppress only the compact widget; they do not stop peers or suppress completion relays.
     - Detailed retained backend diagnostics live in `/peer dashboard advanced`.
     - Legacy `/claude-*` slash commands stay hidden unless you start pi with `PI_CA_LEASH_ENABLE_LEGACY_COMMANDS=1`.
     - Old internal diagnostic slash commands also require `PI_CLAUDE_ENABLE_ADVANCED_COMMANDS=1`.

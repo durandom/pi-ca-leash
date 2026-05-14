@@ -135,6 +135,7 @@ Activation model:
 - the first actionable `/peer` command also activates the workflow and adds the agent guide once
 - `/peer help` stays passive and shows user-only UI help
 - after activation, the background monitor handles broker connectivity, attention notifications, peer relays, and visible dashboard refreshes
+- operators can hide the compact Peers widget with `/peer dashboard hide` or `/peer hide`; this suppresses widget rendering only and does not stop peers or peer completion relays
 
 Context boundary:
 - command acknowledgments, dashboards, model lists, history pages, and diagnostics are operator-facing UI notifications

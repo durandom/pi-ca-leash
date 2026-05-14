@@ -266,6 +266,29 @@ test("first actionable /peer command activates and shows guide once", async () =
   }
 });
 
+test("/peer dashboard hide and show clear and restore the widget", async () => {
+  const harness = await loadCommandHarness({ defaultDriver: "codex-cli" });
+  try {
+    await harness.run("peer", "init");
+    assert.notEqual(harness.widgets.get("peer-dashboard"), undefined);
+
+    const hideBefore = harness.notifications.length;
+    await harness.run("peer", "dashboard hide");
+    assert.equal(harness.widgets.get("peer-dashboard"), undefined);
+    assert.match(notificationMatching(harness.notifications.slice(hideBefore), /Peers widget hidden/), /dashboard show/);
+
+    await harness.run("peer", "list");
+    assert.equal(harness.widgets.get("peer-dashboard"), undefined);
+
+    const showBefore = harness.notifications.length;
+    await harness.run("peer", "show");
+    assert.notEqual(harness.widgets.get("peer-dashboard"), undefined);
+    assert.match(notificationMatching(harness.notifications.slice(showBefore), /Peers widget restored/), /0 peers/);
+  } finally {
+    await harness.close();
+  }
+});
+
 test("compact peer widget renders summary and column labels", async () => {
   const harness = await loadCommandHarness({ defaultDriver: "codex-cli", codexDelayMs: 150 });
   try {
