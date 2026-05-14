@@ -1,7 +1,28 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { createHash } from "node:crypto";
 import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, RuntimeDriverRunInput, StartSessionInput } from "../types.js";
 import { parseClaudeSdkMessage } from "./claude-sdk.js";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Fixed namespace for deterministic UUIDv5 derivation of session ids handed to
+// the claude CLI. Changing this value invalidates all warm-resume caches.
+const CLAUDE_CLI_SESSION_NAMESPACE = "6f2e8d1c-5b3a-4e7f-9c8d-1a2b3c4d5e6f";
+
+export function coerceClaudeCliSessionId(rawId: string): string {
+  if (UUID_RE.test(rawId)) return rawId;
+  return uuidV5(CLAUDE_CLI_SESSION_NAMESPACE, rawId);
+}
+
+function uuidV5(namespace: string, name: string): string {
+  const nsBytes = Buffer.from(namespace.replace(/-/g, ""), "hex");
+  const hash = createHash("sha1").update(nsBytes).update(name, "utf8").digest();
+  const bytes = Buffer.from(hash.subarray(0, 16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
 
 type SpawnFn = typeof nodeSpawn;
 
@@ -26,9 +47,9 @@ export function buildClaudeCliCommand(input: {
   const args = ["-p", "--output-format", "stream-json"];
 
   if (input.resumeSessionId) {
-    args.push("--resume", input.resumeSessionId);
+    args.push("--resume", coerceClaudeCliSessionId(input.resumeSessionId));
   } else {
-    args.push("--session-id", input.sessionId);
+    args.push("--session-id", coerceClaudeCliSessionId(input.sessionId));
     if (input.name) {
       args.push("--name", input.name);
     }
@@ -95,6 +116,7 @@ export class ClaudeCliDriver implements RuntimeDriver {
     let stderrTail = "";
     let stdoutBuffer = "";
     let structuredErrorEmitted = false;
+    let messageEmitted = false;
     let spawnError: Error | undefined;
     let deliveryChain: Promise<void> = Promise.resolve();
 
@@ -122,6 +144,7 @@ export class ClaudeCliDriver implements RuntimeDriver {
         if (message.type === "error") {
           structuredErrorEmitted = true;
         }
+        messageEmitted = true;
         deliver({ type: "message", payload: message });
       }
     }
@@ -161,6 +184,21 @@ export class ClaudeCliDriver implements RuntimeDriver {
           const base = stderrTail.trim() || `claude exited with code ${code}`;
           const ringCtx = ringBuffer.length > 0 ? ` | malformed stdout: ${ringBuffer.slice(-5).join(" | ")}` : "";
           deliver({ type: "error", payload: { message: base + ringCtx } });
+        } else if (
+          !aborted &&
+          code === 0 &&
+          !structuredErrorEmitted &&
+          !messageEmitted &&
+          ringBuffer.length === 0 &&
+          stderrTail.trim().length > 0
+        ) {
+          deliver({
+            type: "error",
+            payload: {
+              message: `claude-cli exited 0 with no JSON output. stderr: ${stderrTail.trim().slice(0, 500)}`,
+              code: "CLAUDE_CLI_NO_OUTPUT",
+            },
+          });
         }
 
         void deliveryChain.then(() => {

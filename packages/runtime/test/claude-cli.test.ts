@@ -5,7 +5,7 @@ import { Readable } from "node:stream";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildClaudeCliCommand, ClaudeCliDriver } from "../src/drivers/claude-cli.js";
+import { buildClaudeCliCommand, ClaudeCliDriver, coerceClaudeCliSessionId } from "../src/drivers/claude-cli.js";
 import { ClaudeCodeRuntime } from "../src/runtime.js";
 import type { DriverEventEnvelope } from "../src/types.js";
 
@@ -47,7 +47,7 @@ test("buildClaudeCliCommand builds resumed print-mode run with model and prompt 
     "--output-format",
     "stream-json",
     "--resume",
-    "sid-abc",
+    coerceClaudeCliSessionId("sid-abc"),
     "--model",
     "claude-sonnet-4-6",
     "--append-system-prompt",
@@ -115,6 +115,72 @@ test("integration produces RuntimeEvents from Claude stream-json messages", asyn
   const transcript = await runtime.readTranscript(session.sessionId);
   assert.equal(transcript.items.some((item) => item.type === "message"), true);
   assert.equal(transcript.items.some((item) => item.type === "result"), true);
+});
+
+test("non-UUID session id is coerced before being passed to --session-id", () => {
+  const args = buildClaudeCliCommand({
+    sessionId: "bugfix:e2e-scenario-d-claude-cli",
+    prompt: "hi",
+    cwd: "/work",
+  });
+  const idx = args.indexOf("--session-id");
+  assert.notEqual(idx, -1);
+  const id = args[idx + 1];
+  assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  // Deterministic: same input → same UUID across calls (warm-resume contract).
+  assert.equal(id, coerceClaudeCliSessionId("bugfix:e2e-scenario-d-claude-cli"));
+  // Passthrough: already-UUID input is unchanged.
+  const uuid = "550e8400-e29b-41d4-a716-446655440000";
+  assert.equal(coerceClaudeCliSessionId(uuid), uuid);
+});
+
+test("--resume value is also coerced when given a non-UUID label", () => {
+  const args = buildClaudeCliCommand({
+    sessionId: "ignored",
+    prompt: "go",
+    cwd: "/work",
+    resumeSessionId: "bugfix:resume-label",
+  });
+  const idx = args.indexOf("--resume");
+  assert.notEqual(idx, -1);
+  assert.match(args[idx + 1], /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+});
+
+test("stderr-only exit-0 produces an error envelope, not silent stdout", async () => {
+  const fakeSpawn = function(_cmd: string, _args: string[], _opts: unknown) {
+    const child = new EventEmitter() as EventEmitter & {
+      stdout: Readable;
+      stderr: Readable;
+      kill: () => void;
+    };
+    const stdout = new Readable({ read() {} });
+    const stderr = new Readable({ read() {} });
+    child.stdout = stdout;
+    child.stderr = stderr;
+    child.kill = () => {};
+    setImmediate(() => {
+      stdout.push(null);
+      stderr.push("Error: Invalid session ID. Must be a valid UUID.\n");
+      stderr.push(null);
+      child.emit("close", 0, null);
+    });
+    return child;
+  } as unknown as typeof import("node:child_process").spawn;
+
+  const driver = new ClaudeCliDriver({ spawn: fakeSpawn });
+  const events: DriverEventEnvelope[] = [];
+  const handle = driver.run({ sessionId: "s1", prompt: "p", cwd: "/tmp" }, (event) => {
+    events.push(event);
+  });
+  const result = await handle.done;
+
+  assert.equal(result.code, 0);
+  const error = events.find((event) => event.type === "error");
+  assert.ok(error, "expected an error envelope on exit-0 + stderr-only");
+  if (error?.type === "error") {
+    assert.equal(error.payload.code, "CLAUDE_CLI_NO_OUTPUT");
+    assert.match(error.payload.message ?? "", /Invalid session ID/);
+  }
 });
 
 test("non-zero exit surfaces stderr as error envelope", async () => {
