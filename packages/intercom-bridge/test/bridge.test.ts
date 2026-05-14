@@ -303,6 +303,71 @@ test("send can deliver fire-and-forget without waiting for idle", async () => {
   assert.equal(peer.state, "busy");
 });
 
+test("send waits through `starting` window instead of throwing", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowDriver() });
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtime,
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 5_000,
+  });
+
+  // Launch fire-and-forget. SlowDriver holds the peer in `starting` for ~80ms.
+  const launched = await bridge.launchPeer({ name: "worker", prompt: "boot", waitForIdle: false });
+  assert.ok(["starting", "busy"].includes(launched.state));
+
+  // A concurrent send must wait through the bootstrap window rather than
+  // throw "busy". By the time it returns, the peer has completed both runs.
+  const result = await bridge.send("worker", { from: "planner", text: "follow-up" });
+  assert.equal(result.state, "idle");
+});
+
+test("send to a genuinely busy peer throws PEER_BUSY with code", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() });
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtime,
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 50,
+  });
+
+  await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+  // SlowResumeDriver makes the resume slow; first fire-and-forget flips peer to busy.
+  await bridge.send("worker", { from: "planner", text: "slow" }, { waitForIdle: false });
+
+  await assert.rejects(
+    () => bridge.send("worker", { from: "planner", text: "second" }, { waitForIdle: false }),
+    (err: unknown) => {
+      assert.equal((err as { code?: string }).code, "PEER_BUSY");
+      assert.match((err as Error).message, /busy executing a prior message/);
+      return true;
+    },
+  );
+});
+
+test("send during `starting` surfaces PEER_STARTING_TIMEOUT when timeout elapses", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowDriver() });
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtime,
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 5_000,
+  });
+
+  await bridge.launchPeer({ name: "worker", prompt: "boot", waitForIdle: false });
+  // SlowDriver takes ~80ms; ask with timeoutMs=20 forces the starting-window wait to expire.
+  await assert.rejects(
+    () => bridge.ask("worker", { from: "planner", text: "follow-up", timeoutMs: 20 }),
+    (err: unknown) => {
+      assert.equal((err as { code?: string }).code, "PEER_STARTING_TIMEOUT");
+      return true;
+    },
+  );
+});
+
 test("interrupt signals a busy peer and keeps it registered", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
   const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() });
@@ -514,6 +579,36 @@ test("listPeers reconciles externally created peers without restart", async () =
   assert.equal(listed[0]?.kind, "managed");
   assert.deepEqual(listed[0]?.metadata, { cycleId: "cycle-1", owner: "castra" });
   assert.equal((await dashboardBridge.status("worker"))?.sessionId, listed[0]?.sessionId);
+});
+
+test("stop restores externally listed peers before stopping", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new FakeDriver() });
+
+  const externalBridge = new ClaudeRuntimeIntercomBridge({
+    runtime,
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+  await externalBridge.launchPeer({
+    name: "worker",
+    prompt: "boot",
+    kind: "managed",
+    metadata: { owner: "castra" },
+  });
+
+  const commandBridge = new ClaudeRuntimeIntercomBridge({
+    runtime,
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  const stopped = await commandBridge.stop("worker");
+  assert.equal(stopped.name, "worker");
+  assert.equal(stopped.state, "stopped");
+  assert.equal((await commandBridge.listPeers()).length, 0);
 });
 
 test("PiCaLeashManagedPeerApi uses shared pi-ca-leash state paths", async () => {

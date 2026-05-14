@@ -144,6 +144,9 @@ export class ClaudeRuntimeIntercomBridge {
   }
 
   async stop(name: string): Promise<BridgePeer> {
+    if (!this.peers.has(name)) {
+      await this.restorePeers();
+    }
     const peer = this.requirePeer(name);
     const status = await this.runtime.stop(peer.sessionId);
     const stopped = this.peerFromStatus(name, status, mapRuntimeState(status.state, true), peer);
@@ -231,12 +234,35 @@ export class ClaudeRuntimeIntercomBridge {
   }
 
   private async deliver(name: string, inbound: IntercomInboundMessage, options: { waitForIdle: boolean }): Promise<AskResult> {
-    const peer = await this.syncPeerFromRuntime(name);
-    if (["busy", "starting"].includes(peer.state)) {
-      throw new Error(`Peer ${name} busy. Message was not delivered. Use fire-and-forget send only after the peer is idle or wait for the automated peer update.`);
+    let peer = await this.syncPeerFromRuntime(name);
+    if (peer.state === "starting" || peer.state === "connected") {
+      // Slow-spawn drivers (notably claude-cli) leave the peer in `starting`
+      // while the first prompt runs. Wait for the bootstrap window to close
+      // before deciding deliverability — racing it would surface as a
+      // misleading "busy" error even though the peer never had a chance to run.
+      const waited = await this.waitForTerminalStateOrCurrent(
+        peer.sessionId,
+        inbound.timeoutMs ?? this.askTimeoutMs,
+      );
+      if (waited.timedOut) {
+        throw Object.assign(
+          new Error(`Peer ${name} did not finish starting within timeout. Last runtime state: ${waited.status.state}.`),
+          { code: "PEER_STARTING_TIMEOUT" },
+        );
+      }
+      peer = await this.syncPeerFromRuntime(name);
+    }
+    if (peer.state === "busy") {
+      throw Object.assign(
+        new Error(`Peer ${name} is busy executing a prior message. Wait for state=idle.`),
+        { code: "PEER_BUSY" },
+      );
     }
     if (["stopped", "disconnected"].includes(peer.state)) {
-      throw new Error(`Peer ${name} unavailable (${peer.state})`);
+      throw Object.assign(
+        new Error(`Peer ${name} unavailable (${peer.state})`),
+        { code: "PEER_UNAVAILABLE" },
+      );
     }
 
     const before = await this.runtime.events(peer.sessionId);
