@@ -188,6 +188,64 @@ async function waitForState(runtime: ClaudeCodeRuntime, sessionId: string, expec
   throw new Error(`Timed out waiting for ${expected}`);
 }
 
+test("fresh session transitions `starting` → `running` on first driver message", async () => {
+  // Two-gated driver: hold back the first emit, then hold again before the
+  // terminal `result`, so we can observe the `running` window deterministically.
+  class TwoGatedDriver implements RuntimeDriver {
+    readonly name: RuntimeDriverName = "claude-sdk";
+    releaseInit = () => {};
+    releaseResult = () => {};
+    private initGate = new Promise<void>((r) => { this.releaseInit = r; });
+    private resultGate = new Promise<void>((r) => { this.releaseResult = r; });
+    run(input: RuntimeDriverRunInput, onEvent: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+      const done = (async () => {
+        await this.initGate;
+        await onEvent({
+          type: "message",
+          payload: {
+            type: "system",
+            subtype: "init",
+            sessionId: input.sessionId,
+            model: "fake-model",
+            raw: { type: "system", subtype: "init", session_id: input.sessionId, model: "fake-model" },
+          },
+        });
+        await this.resultGate;
+        await onEvent({
+          type: "message",
+          payload: {
+            type: "result",
+            ok: true,
+            summary: "done",
+            stopReason: "end_turn",
+            usage: { inputTokens: 1, outputTokens: 1, raw: { input_tokens: 1, output_tokens: 1 } },
+            raw: { type: "result", is_error: false, result: "done", stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } },
+          },
+        });
+        return { code: 0, signal: null } as const;
+      })();
+      return { kill: () => {}, done };
+    }
+  }
+
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-runtime-test-"));
+  const driver = new TwoGatedDriver();
+  const runtime = new ClaudeCodeRuntime({ storageDir, driver });
+
+  const session = await runtime.start({ prompt: "hello", driver: "claude-sdk" });
+  // Before init releases, no driver events have fired — state must be `starting`.
+  assert.equal((await runtime.status(session.sessionId))?.state, "starting");
+
+  // Release init; the first driver event should promote `starting` → `running`.
+  // Holding the result gate keeps the run from transitioning to `idle`.
+  driver.releaseInit();
+  await waitForState(runtime, session.sessionId, "running");
+
+  // Release result; run completes and state moves to `idle`.
+  driver.releaseResult();
+  await waitForState(runtime, session.sessionId, "idle");
+});
+
 test("start persists state, transcript, and explicit driver identity", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-runtime-test-"));
   const runtime = new ClaudeCodeRuntime({ storageDir, driver: new FakeDriver() });

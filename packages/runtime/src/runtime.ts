@@ -345,6 +345,17 @@ export class ClaudeCodeRuntime {
     }
 
     const current = await this.requireSession(sessionId);
+    if (current.state === "starting") {
+      // The driver has produced its first envelope, so the subprocess is
+      // past bootstrap and actively running. Promote `starting` → `running`
+      // so observers (notably bridge.deliver's starting-window wait) see
+      // accurate liveness instead of a stuck `starting` for the full run.
+      const promoted = await this.patchStatus(sessionId, { state: "running" });
+      await this.emitEvent(
+        { type: "session.updated", sessionId, state: "running", patch: { state: "running" } },
+        promoted,
+      );
+    }
     const message = envelope.payload;
 
     switch (message.type) {

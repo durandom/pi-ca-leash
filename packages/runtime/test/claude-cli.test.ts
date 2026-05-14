@@ -117,6 +117,44 @@ test("integration produces RuntimeEvents from Claude stream-json messages", asyn
   assert.equal(transcript.items.some((item) => item.type === "result"), true);
 });
 
+test("ClaudeCliDriver defaults permissionMode to bypassPermissions when caller omits it", async () => {
+  let capturedArgs: string[] = [];
+  const fakeSpawn = function(_cmd: string, args: string[], _opts: unknown) {
+    capturedArgs = args;
+    const child = new EventEmitter() as EventEmitter & { stdout: Readable; stderr: Readable; kill: () => void };
+    const stdout = new Readable({ read() {} });
+    const stderr = new Readable({ read() {} });
+    child.stdout = stdout;
+    child.stderr = stderr;
+    child.kill = () => {};
+    setImmediate(() => {
+      stdout.push(null);
+      stderr.push(null);
+      child.emit("close", 0, null);
+    });
+    return child;
+  } as unknown as typeof import("node:child_process").spawn;
+
+  const driver = new ClaudeCliDriver({ spawn: fakeSpawn });
+  const handle = driver.run({ sessionId: "s1", prompt: "noop", cwd: "/tmp" }, () => {});
+  await handle.done;
+
+  const idx = capturedArgs.indexOf("--permission-mode");
+  assert.notEqual(idx, -1, "expected --permission-mode to be present by default");
+  assert.equal(capturedArgs[idx + 1], "bypassPermissions");
+});
+
+test("explicit permissionMode wins over the driver default", () => {
+  const args = buildClaudeCliCommand({
+    sessionId: "550e8400-e29b-41d4-a716-446655440000",
+    prompt: "noop",
+    cwd: "/tmp",
+    permissionMode: "acceptEdits",
+  });
+  const idx = args.indexOf("--permission-mode");
+  assert.equal(args[idx + 1], "acceptEdits");
+});
+
 test("non-UUID session id is coerced before being passed to --session-id", () => {
   const args = buildClaudeCliCommand({
     sessionId: "bugfix:e2e-scenario-d-claude-cli",

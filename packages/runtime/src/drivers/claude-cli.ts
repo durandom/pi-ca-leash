@@ -102,7 +102,10 @@ export class ClaudeCliDriver implements RuntimeDriver {
       model: input.model,
       name: input.name,
       appendSystemPrompt: input.appendSystemPrompt,
-      permissionMode: input.permissionMode ?? this.defaultPermissionMode,
+      // Default to bypassPermissions for parity with claude-sdk. Without an
+      // explicit mode the CLI may prompt interactively, but stdin is closed
+      // (`stdio: ["ignore", ...]`) so any prompt blocks the child forever.
+      permissionMode: input.permissionMode ?? this.defaultPermissionMode ?? "bypassPermissions",
       tools: input.tools,
       additionalDirectories: input.additionalDirectories,
       resumeSessionId: input.resumeSessionId,
