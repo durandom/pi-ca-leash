@@ -220,12 +220,11 @@ async function defaultCreateSession(
   input: PiCodingAgentSessionFactoryInput,
   defaultThinkingLevel: "off" | "low" | "medium" | "high",
 ): Promise<PiCodingAgentSessionLike> {
-  // Dynamic import so the package stays optional. Consumers that never select
-  // this driver should not have to install @earendil-works/pi-coding-agent.
+  // Dynamic import keeps the load lazy; the package is a hard dep of
+  // pi-ca-leash so resolution should always succeed.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let sdk: any;
   try {
-    // @ts-expect-error — optional peer dependency, may not be installed
     sdk = await import("@earendil-works/pi-coding-agent");
   } catch (error) {
     throw new Error(
