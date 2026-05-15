@@ -19,6 +19,7 @@ test("buildClaudeCliCommand builds fresh print-mode run", () => {
   });
   assert.deepEqual(args, [
     "-p",
+    "--verbose",
     "--output-format",
     "stream-json",
     "--session-id",
@@ -27,6 +28,7 @@ test("buildClaudeCliCommand builds fresh print-mode run", () => {
     "worker",
     "--permission-mode",
     "bypassPermissions",
+    "--",
     "hello",
   ]);
 });
@@ -44,6 +46,7 @@ test("buildClaudeCliCommand builds resumed print-mode run with model and prompt 
   });
   assert.deepEqual(args, [
     "-p",
+    "--verbose",
     "--output-format",
     "stream-json",
     "--resume",
@@ -57,8 +60,33 @@ test("buildClaudeCliCommand builds resumed print-mode run with model and prompt 
     "Read",
     "--add-dir",
     "/extra",
+    "--",
     "continue",
   ]);
+});
+
+test("buildClaudeCliCommand terminates variadic flags with `--` before prompt", () => {
+  // Regression for E2E.8: claude's --add-dir and --allowedTools are
+  // Commander.js variadic flags. Without `--`, the trailing positional
+  // prompt is consumed as another tool/directory and claude exits with
+  //   "Error: Input must be provided either through stdin or as a prompt
+  //    argument when using --print"
+  // before producing any stream-json output, leaving the runtime stuck
+  // in `starting`.
+  const args = buildClaudeCliCommand({
+    sessionId: "550e8400-e29b-41d4-a716-446655440000",
+    prompt: "do the thing",
+    cwd: "/work",
+    tools: ["Read"],
+    additionalDirectories: ["/work"],
+  });
+  const dashDash = args.indexOf("--");
+  assert.notEqual(dashDash, -1, "`--` must be present");
+  assert.equal(args[dashDash + 1], "do the thing", "prompt must immediately follow `--`");
+  assert.equal(args[args.length - 1], "do the thing", "prompt must be the last arg");
+  // `--add-dir` must precede `--`, not follow it.
+  assert.ok(args.indexOf("--add-dir") < dashDash);
+  assert.ok(args.indexOf("--allowedTools") < dashDash);
 });
 
 function makeFakeSpawn(lines: string[], exitCode = 0) {
