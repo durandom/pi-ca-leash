@@ -108,7 +108,7 @@ export const RUNTIME_MODEL_CATALOGS: Record<string, RuntimeDriverModelCatalog> =
       { id: "gpt-5.2", name: "GPT-5.2", contextWindow: 272000, maxTokens: 128000, reasoning: true, inputModalities: ["text", "image"], inputCostPerMillion: 1.75, outputCostPerMillion: 14 },
       { id: "gpt-5.2-codex", name: "GPT-5.2 Codex", contextWindow: 272000, maxTokens: 128000, reasoning: true, inputModalities: ["text", "image"], inputCostPerMillion: 1.75, outputCostPerMillion: 14 },
       { id: "gpt-5.3-codex", name: "GPT-5.3 Codex", contextWindow: 272000, maxTokens: 128000, reasoning: true, inputModalities: ["text", "image"], inputCostPerMillion: 1.75, outputCostPerMillion: 14 },
-      { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", contextWindow: 128000, maxTokens: 128000, reasoning: true, inputModalities: ["text"], inputCostPerMillion: 0, outputCostPerMillion: 0 },
+      { id: "gpt-5.3-codex-spark", name: "GPT-5.3 Codex Spark", contextWindow: 128000, maxTokens: 128000, reasoning: true, inputModalities: ["text"], inputCostPerMillion: 3.5, outputCostPerMillion: 28 },
       { id: "gpt-5.4", name: "GPT-5.4", contextWindow: 272000, maxTokens: 128000, reasoning: true, inputModalities: ["text", "image"], inputCostPerMillion: 2.5, outputCostPerMillion: 15 },
       { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", contextWindow: 272000, maxTokens: 128000, reasoning: true, inputModalities: ["text", "image"], inputCostPerMillion: 0.75, outputCostPerMillion: 4.5 },
       { id: "gpt-5.5", name: "GPT-5.5", contextWindow: 272000, maxTokens: 128000, reasoning: true, inputModalities: ["text", "image"], inputCostPerMillion: 5, outputCostPerMillion: 30 },
@@ -120,9 +120,12 @@ export function modelCatalogsForDriver(driver?: RuntimeDriverName): RuntimeDrive
   if (driver) {
     return [catalogForDriver(driver)];
   }
+  // claude-cli intentionally omitted: the driver is unstable in practice
+  // (sticky-session / non-interactive output issues), so it is not part of
+  // the recommended runtime surface. Callers that explicitly request it
+  // via catalogForDriver("claude-cli") will throw.
   return [
     catalogForDriver("claude-sdk"),
-    catalogForDriver("claude-cli"),
     catalogForDriver("codex-cli"),
     catalogForDriver("pi-coding-agent"),
   ];
@@ -175,24 +178,24 @@ export function resolveRuntimeModelSelection(driver: RuntimeDriverName, model?: 
 
 function catalogForDriver(driver: RuntimeDriverName): RuntimeDriverModelCatalog {
   if (driver === "claude-cli") {
-    const base = RUNTIME_MODEL_CATALOGS["claude-sdk"]!;
-    return {
-      ...base,
-      driver,
-      cli: "claude",
-      flag: "claude -p --model <id>",
-      source: `${base.source}; shared with claude-sdk catalog`,
-    };
+    throw new Error(
+      "claude-cli driver is no longer supported by the runtime model catalog " +
+        "(driver retired due to sticky-session / non-interactive output issues). " +
+        "Use claude-sdk for Claude models.",
+    );
   }
   if (driver === "pi-coding-agent") {
-    const base = RUNTIME_MODEL_CATALOGS["claude-sdk"]!;
+    // pi-coding-agent routes through pi-ai, which only proxies gpt-* models
+    // in our environment. Inherit the codex-cli catalog so recommendations
+    // and model entries advertise the actually-supported set.
+    const base = RUNTIME_MODEL_CATALOGS["codex-cli"]!;
     return {
       ...base,
       driver,
       provider: "pi-ai",
       cli: "pi",
       flag: "pi --model <provider>/<id>",
-      source: `${base.source}; shared with claude-sdk catalog (pi-coding-agent routes through pi-ai)`,
+      source: `${base.source}; shared with codex-cli catalog (pi-coding-agent routes through pi-ai to gpt-* models)`,
     };
   }
   return RUNTIME_MODEL_CATALOGS[driver]!;

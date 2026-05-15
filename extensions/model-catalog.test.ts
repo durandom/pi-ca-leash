@@ -4,23 +4,33 @@ import { describeModelSelection, findRuntimeModel, modelCatalogsForDriver, resol
 
 test("model catalog maps runtime drivers to Lanista provider snapshots", () => {
   const claude = modelCatalogsForDriver("claude-sdk")[0]!;
-  const claudeCli = modelCatalogsForDriver("claude-cli")[0]!;
   const codex = modelCatalogsForDriver("codex-cli")[0]!;
+  const piAgent = modelCatalogsForDriver("pi-coding-agent")[0]!;
 
   assert.equal(claude.provider, "anthropic");
   assert.equal(claude.defaultModel, "claude-opus-4-7");
   assert.equal(claude.aliases.sonnet, "claude-sonnet-4-6");
   assert.deepEqual(claude.recommendations.map((entry) => entry.alias), ["opus", "sonnet", "haiku"]);
   assert.ok(findRuntimeModel("claude-sdk", "claude-sonnet-4-6"));
-  assert.equal(claudeCli.driver, "claude-cli");
-  assert.equal(claudeCli.provider, "anthropic");
-  assert.ok(findRuntimeModel("claude-cli", "claude-sonnet-4-6"));
 
   assert.equal(codex.provider, "openai-codex");
   assert.equal(codex.defaultModel, "gpt-5.5");
   assert.equal(codex.aliases.mini, "gpt-5.4-mini");
   assert.deepEqual(codex.recommendations.map((entry) => entry.alias), ["default", "codex", "mini", "spark"]);
   assert.ok(findRuntimeModel("codex-cli", "gpt-5.4-mini"));
+
+  // pi-coding-agent inherits the codex-cli catalog (gpt-* models only).
+  assert.equal(piAgent.driver, "pi-coding-agent");
+  assert.equal(piAgent.provider, "pi-ai");
+  assert.equal(piAgent.defaultModel, "gpt-5.5");
+  assert.ok(piAgent.models.every((m) => m.id.startsWith("gpt-")));
+});
+
+test("claude-cli driver is retired and surfaces a clear error", () => {
+  assert.throws(
+    () => modelCatalogsForDriver("claude-cli"),
+    /claude-cli driver is no longer supported/,
+  );
 });
 
 test("model aliases resolve to concrete runtime model ids", () => {
