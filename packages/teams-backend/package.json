@@ -1,6 +1,6 @@
 {
   "name": "@pi-claude-code-agent/teams-backend",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "type": "module",
   "description": "Persistent teammate backend on top of Claude runtime intercom bridge",
   "files": [
@@ -24,8 +24,8 @@
     "demo": "tsx src/cli.ts"
   },
   "peerDependencies": {
-    "@pi-claude-code-agent/intercom-bridge": "0.11.0",
-    "@pi-claude-code-agent/runtime": "0.11.0"
+    "@pi-claude-code-agent/intercom-bridge": "0.12.0",
+    "@pi-claude-code-agent/runtime": "0.12.0"
   },
   "devDependencies": {
     "tsx": "^4.20.6"

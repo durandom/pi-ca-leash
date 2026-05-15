@@ -4,7 +4,14 @@ All notable changes to this repository should be recorded here.
 
 ## Unreleased
 
+## 0.12.0 - 2026-05-15
+
+### Fixed
+- `claude-cli` driver no longer hangs in `starting` when the caller passes `tools` or `additionalDirectories`. The runtime previously emitted `claude -p ... --add-dir <cwd> <prompt>`; claude 2.1.x's `--add-dir` and `--allowedTools` are Commander.js variadic flags that consumed the positional prompt, causing claude to exit with `Error: Input must be provided either through stdin or as a prompt argument when using --print` before any stream-json envelope flowed. The argument builder now appends a POSIX `--` end-of-options marker before the prompt so variadic flags stop consuming at the boundary.
+- `claude-cli` driver now passes `--verbose` alongside `--output-format stream-json`. Claude 2.1+ requires it when combining `--print` with stream-json output and rejected the prior invocation immediately.
+
 ### Changed
+- `@earendil-works/pi-coding-agent` is now a hard dependency rather than an optional peer. The catalog change that pointed `gpt-*` models at the pi-coding-agent driver made this package required in every install; the optional-peer treatment caused needless `@ts-expect-error` plumbing and surprising install-time gaps.
 - Added `/peer dashboard hide|show` plus `/peer hide|show` aliases so operators can clear or restore the compact Peers widget without stopping peers or disabling completion relays.
 - Added an optional `claude-cli` runtime driver that shells out to local `claude -p --output-format stream-json`, preserves the existing `claude-sdk` driver, and supports resumed peer follow-up sends via Claude Code session ids.
 - Added pi-ca-leash JSON config loading from XDG global config, repository-local `.pi-ca-leash/config.json`, and optional `PI_CA_LEASH_CONFIG`, with explicit tool/command driver parameters and `PI_CLAUDE_RUNTIME_DRIVER` taking precedence for driver selection.

@@ -48,7 +48,12 @@ export function buildClaudeCliCommand(input: {
   additionalDirectories?: string[];
   resumeSessionId?: string;
 }): string[] {
-  const args = ["-p", "--output-format", "stream-json"];
+  // --verbose is REQUIRED by claude when combining --print with
+  // --output-format=stream-json; without it the CLI exits 1 with
+  //   "Error: When using --print, --output-format=stream-json requires --verbose"
+  // and the driver never sees any stream-json events. This is the
+  // claude-2.1.x contract; older builds didn't require it.
+  const args = ["-p", "--verbose", "--output-format", "stream-json"];
 
   if (input.resumeSessionId) {
     args.push("--resume", coerceClaudeCliSessionId(input.resumeSessionId));
@@ -74,7 +79,15 @@ export function buildClaudeCliCommand(input: {
     args.push("--add-dir", ...input.additionalDirectories);
   }
 
-  args.push(input.prompt);
+  // Terminate variadic flags (--allowedTools, --add-dir) before the
+  // positional prompt. Without `--`, claude consumes the prompt as another
+  // tool or directory and exits with:
+  //   "Error: Input must be provided either through stdin or as a prompt
+  //    argument when using --print"
+  // — even though the prompt was passed. The CLI surface uses Commander.js
+  // variadic args (`<tools...>`, `<directories...>`); `--` is the POSIX
+  // end-of-options marker and Commander honours it.
+  args.push("--", input.prompt);
   return args;
 }
 
