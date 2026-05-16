@@ -65,6 +65,7 @@ export class ClaudeRuntimeIntercomBridge {
       tools: input.tools,
       additionalDirectories: input.additionalDirectories,
       env: input.env,
+      thinkingLevel: input.thinkingLevel,
     });
     const peer = this.peerFromStatus(input.name, status, "starting", {
       kind: input.kind ?? "ad-hoc",

@@ -65,6 +65,8 @@ export interface RuntimeStatus {
   raw?: Record<string, unknown>;
 }
 
+export type RuntimeThinkingLevel = "off" | "low" | "medium" | "high";
+
 export interface StartSessionInput {
   prompt: string;
   driver?: RuntimeDriverName;
@@ -82,6 +84,13 @@ export interface StartSessionInput {
   tools?: string[];
   additionalDirectories?: string[];
   env?: Record<string, string>;
+  /**
+   * Per-call thinking budget for drivers that support it (currently the
+   * `pi-coding-agent` driver). When omitted, the driver's configured
+   * `defaultThinkingLevel` is used. Drivers that don't support per-call
+   * thinking ignore this field.
+   */
+  thinkingLevel?: RuntimeThinkingLevel;
 }
 
 export interface SendMessageInput {
@@ -90,6 +99,8 @@ export interface SendMessageInput {
   appendSystemPrompt?: string;
   model?: string;
   env?: Record<string, string>;
+  /** See {@link StartSessionInput.thinkingLevel}. */
+  thinkingLevel?: RuntimeThinkingLevel;
 }
 
 export interface InterruptResult {
@@ -201,6 +212,8 @@ export interface RuntimeDriverRunInput {
   additionalDirectories?: string[];
   env?: Record<string, string>;
   resumeSessionId?: string;
+  /** See {@link StartSessionInput.thinkingLevel}. */
+  thinkingLevel?: RuntimeThinkingLevel;
 }
 
 export type DriverEventEnvelope =

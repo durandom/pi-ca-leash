@@ -127,6 +127,7 @@ export class ClaudeCodeRuntime {
       tools: input.tools,
       additionalDirectories: input.additionalDirectories,
       env: input.env,
+      thinkingLevel: input.thinkingLevel,
     });
     return (await this.status(sessionId))!;
   }
@@ -147,6 +148,7 @@ export class ClaudeCodeRuntime {
       name: status.name,
       env: input.env,
       resumeSessionId: status.driverSessionId,
+      thinkingLevel: input.thinkingLevel,
     });
     return (await this.status(input.sessionId))!;
   }
@@ -238,6 +240,7 @@ export class ClaudeCodeRuntime {
       additionalDirectories?: string[];
       env?: Record<string, string>;
       resumeSessionId?: string;
+      thinkingLevel?: StartSessionInput["thinkingLevel"];
     },
   ): Promise<void> {
     const runId = randomUUID();
@@ -267,6 +270,7 @@ export class ClaudeCodeRuntime {
         additionalDirectories: input.additionalDirectories,
         env: input.env,
         resumeSessionId: input.resumeSessionId,
+        thinkingLevel: input.thinkingLevel,
       },
       async (event) => {
         await this.handleDriverEvent(status.sessionId, event);

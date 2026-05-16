@@ -27,6 +27,7 @@ export type {
   RuntimeSessionId,
   RuntimeSessionState,
   RuntimeStatus,
+  RuntimeThinkingLevel,
   SendMessageInput,
   StartSessionInput,
   ToolEvent,

@@ -201,6 +201,12 @@ export interface PiCodingAgentSessionFactoryInput {
   env?: Record<string, string>;
   appendSystemPrompt?: string;
   resumeSessionId?: string;
+  /**
+   * Effective thinking level for this session. Resolved by the driver from
+   * the per-call `RuntimeDriverRunInput.thinkingLevel` with a fallback to
+   * `PiCodingAgentDriverOptions.defaultThinkingLevel`. Always set.
+   */
+  thinkingLevel: "off" | "low" | "medium" | "high";
 }
 
 export type PiCodingAgentSessionFactory = (
@@ -218,7 +224,6 @@ const DEFAULT_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
 
 async function defaultCreateSession(
   input: PiCodingAgentSessionFactoryInput,
-  defaultThinkingLevel: "off" | "low" | "medium" | "high",
 ): Promise<PiCodingAgentSessionLike> {
   // Dynamic import keeps the load lazy; the package is a hard dep of
   // pi-ca-leash so resolution should always succeed.
@@ -247,7 +252,7 @@ async function defaultCreateSession(
     tools: input.tools ?? DEFAULT_TOOLS,
     model,
     modelRegistry,
-    thinkingLevel: defaultThinkingLevel,
+    thinkingLevel: input.thinkingLevel,
     sessionManager,
     sessionStartEvent: {
       type: "session_start",
@@ -280,11 +285,11 @@ export class PiCodingAgentDriver implements RuntimeDriver {
   readonly name = "pi-coding-agent" as const;
 
   private readonly createSession: PiCodingAgentSessionFactory;
+  private readonly defaultThinkingLevel: "off" | "low" | "medium" | "high";
 
   constructor(options: PiCodingAgentDriverOptions = {}) {
-    const defaultThinkingLevel = options.defaultThinkingLevel ?? "high";
-    this.createSession =
-      options.createSession ?? ((input) => defaultCreateSession(input, defaultThinkingLevel));
+    this.defaultThinkingLevel = options.defaultThinkingLevel ?? "high";
+    this.createSession = options.createSession ?? defaultCreateSession;
   }
 
   run(
@@ -308,6 +313,12 @@ export class PiCodingAgentDriver implements RuntimeDriver {
       });
     }
 
+    // Resolve per-call thinking level with a fallback to the driver default.
+    // Downstream consumers (e.g. pi-ca-leash event log) can audit what
+    // actually landed on the wire via the `thinkingLevel` field echoed on
+    // the init system event below.
+    const effectiveThinkingLevel = input.thinkingLevel ?? this.defaultThinkingLevel;
+
     const done = (async () => {
       try {
         session = await this.createSession({
@@ -318,6 +329,7 @@ export class PiCodingAgentDriver implements RuntimeDriver {
           env: input.env,
           appendSystemPrompt: input.appendSystemPrompt,
           resumeSessionId: input.resumeSessionId,
+          thinkingLevel: effectiveThinkingLevel,
         });
 
         deliver({
@@ -328,7 +340,11 @@ export class PiCodingAgentDriver implements RuntimeDriver {
             sessionId: session.sessionId,
             cwd: input.cwd,
             model: input.model,
-            raw: { sessionId: session.sessionId },
+            raw: {
+              sessionId: session.sessionId,
+              thinkingLevel: effectiveThinkingLevel,
+              thinkingLevelSource: input.thinkingLevel ? "per-call" : "default",
+            },
           } satisfies SystemDriverMessage,
         });
 

@@ -5,6 +5,7 @@ import type {
   RuntimeEvent,
   RuntimeSessionId,
   RuntimeStatus,
+  RuntimeThinkingLevel,
   StartSessionInput,
 } from "@pi-claude-code-agent/runtime";
 
@@ -55,6 +56,13 @@ export interface LaunchPeerInput {
   waitForIdle?: boolean;
   kind?: BridgePeerKind;
   metadata?: Record<string, string>;
+  /**
+   * Per-call thinking budget for drivers that support it (currently
+   * `pi-coding-agent`). When omitted, the driver's configured
+   * `defaultThinkingLevel` is used. Drivers that don't support per-call
+   * thinking ignore this field.
+   */
+  thinkingLevel?: RuntimeThinkingLevel;
 }
 
 export interface AttachPeerInput {
