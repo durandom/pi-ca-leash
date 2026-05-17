@@ -4,6 +4,13 @@ All notable changes to this repository should be recorded here.
 
 ## Unreleased
 
+## 0.15.0 - 2026-05-17
+
+### Added
+- `RuntimeThinkingLevel` widened from the four-step ladder (`"off" | "low" | "medium" | "high"`) to a vendor-superset vocabulary: `"off" | "minimal" | "low" | "medium" | "high" | "xhigh"`. `"minimal"` matches OpenAI's `reasoning_effort: "minimal"`; `"xhigh"` is a placeholder for above-high vendor budgets some families surface. Callers can now write the vendor-native value verbatim — drivers project to their native vocabulary internally so consumers don't have to maintain duplicate fold helpers.
+- Per-driver thinking-level fold table (issue [#6](https://github.com/durandom/pi-ca-leash/issues/6)). For `pi-coding-agent`: `minimal → low`, `xhigh → high`, others passthrough. For `claude-sdk` / `claude-cli` / `codex-cli`: not consumed (no per-call thinking knob in their CLI/SDK surface today).
+- `init` system event now carries `thinkingLevelSupported: boolean` plus `effectiveThinkingLevel` and `requestedThinkingLevel` so audit consumers can detect the silent-drop failure mode (PM-026 in spellkave) without running a synthetic latency/usage probe. On `pi-coding-agent` the fields land on `init.raw` alongside the existing `resumed` / `securityMode` family; on the three other drivers they land in `init.metadata` (added by a shared `enrichInitWithCapabilities` helper that wraps the driver's `onEvent` callback for the first `system/init` message only).
+
 ## 0.14.0 - 2026-05-17
 
 ### Fixed
