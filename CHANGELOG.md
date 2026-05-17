@@ -4,6 +4,15 @@ All notable changes to this repository should be recorded here.
 
 ## Unreleased
 
+## 0.14.0 - 2026-05-17
+
+### Fixed
+- `pi-coding-agent` driver: session resume no longer silently no-ops for callers that change `cwd` between turns (e.g. spellkave's per-task worktree pattern). The driver now pins the SDK's `sessionDir` to a runtime-owned, per-`sessionId` directory under `<storageDir>/sessions/<sessionId>/pi-coding-agent/` instead of relying on the SDK's default cwd-encoded path under `~/.pi/agent/sessions/`. Resume survives both worktree drift and process restarts; cache-read tokens are reclaimed on sticky roles previously affected by issue [#5](https://github.com/durandom/pi-ca-leash/issues/5). Interactive `pi-dev` usage at `~/.pi/agent/sessions/` is untouched.
+
+### Added
+- New optional field `sessionStorageDir` on `RuntimeDriverRunInput`. The runtime always populates it with the per-session storage directory; drivers may colocate persistent state with the runtime's `state.json` / `events.jsonl` / `transcript.jsonl`. Currently only consumed by the `pi-coding-agent` driver.
+- `pi-coding-agent` init system event now exposes `resumed`, `resumeSupported`, and `driverSessionDir` on its `raw` payload so audit consumers can detect silent resume failures instead of inferring from `cacheRead` being zero.
+
 ## 0.13.0 - 2026-05-17
 
 ### Added
