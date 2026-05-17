@@ -17,6 +17,7 @@ import { ClaudeCliDriver } from "./drivers/claude-cli.js";
 import { CodexCliDriver } from "./drivers/codex-cli.js";
 import { PiCodingAgentDriver } from "./drivers/pi-coding-agent.js";
 import { loadPiCaLeashConfigSync } from "./config.js";
+import { resolveSecurityMode } from "./security-mode.js";
 import type { NormalizedDriverMessageBlock } from "./drivers/messages.js";
 import type {
   DriverEventEnvelope,
@@ -123,10 +124,11 @@ export class ClaudeCodeRuntime {
       appendSystemPrompt: input.appendSystemPrompt,
       model: input.model,
       name: input.name,
-      permissionMode: input.permissionMode,
+      securityMode: resolveSecurityMode(input),
       tools: input.tools,
       additionalDirectories: input.additionalDirectories,
       env: input.env,
+      thinkingLevel: input.thinkingLevel,
     });
     return (await this.status(sessionId))!;
   }
@@ -145,8 +147,10 @@ export class ClaudeCodeRuntime {
       appendSystemPrompt: input.appendSystemPrompt,
       model: input.model ?? status.model,
       name: status.name,
+      securityMode: resolveSecurityMode(input),
       env: input.env,
       resumeSessionId: status.driverSessionId,
+      thinkingLevel: input.thinkingLevel,
     });
     return (await this.status(input.sessionId))!;
   }
@@ -233,11 +237,12 @@ export class ClaudeCodeRuntime {
       appendSystemPrompt?: string;
       model?: string;
       name?: string;
-      permissionMode?: StartSessionInput["permissionMode"];
+      securityMode?: StartSessionInput["securityMode"];
       tools?: string[];
       additionalDirectories?: string[];
       env?: Record<string, string>;
       resumeSessionId?: string;
+      thinkingLevel?: StartSessionInput["thinkingLevel"];
     },
   ): Promise<void> {
     const runId = randomUUID();
@@ -262,11 +267,12 @@ export class ClaudeCodeRuntime {
         model: input.model,
         name: input.name,
         appendSystemPrompt: input.appendSystemPrompt,
-        permissionMode: input.permissionMode,
+        securityMode: input.securityMode,
         tools: input.tools,
         additionalDirectories: input.additionalDirectories,
         env: input.env,
         resumeSessionId: input.resumeSessionId,
+        thinkingLevel: input.thinkingLevel,
       },
       async (event) => {
         await this.handleDriverEvent(status.sessionId, event);

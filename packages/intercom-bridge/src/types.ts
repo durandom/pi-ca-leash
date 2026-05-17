@@ -5,6 +5,8 @@ import type {
   RuntimeEvent,
   RuntimeSessionId,
   RuntimeStatus,
+  RuntimeSecurityMode,
+  RuntimeThinkingLevel,
   StartSessionInput,
 } from "@pi-claude-code-agent/runtime";
 
@@ -48,13 +50,27 @@ export interface LaunchPeerInput {
   cwd?: string;
   model?: string;
   appendSystemPrompt?: string;
+  /** @deprecated Use `securityMode`. */
   permissionMode?: StartSessionInput["permissionMode"];
+  /**
+   * Coarse security posture. `safe` (default) keeps the driver's native
+   * sandbox/permission prompts; `yolo` disables them where the driver
+   * supports it. See runtime `RuntimeSecurityMode` for per-driver details.
+   */
+  securityMode?: RuntimeSecurityMode;
   tools?: string[];
   additionalDirectories?: string[];
   env?: Record<string, string>;
   waitForIdle?: boolean;
   kind?: BridgePeerKind;
   metadata?: Record<string, string>;
+  /**
+   * Per-call thinking budget for drivers that support it (currently
+   * `pi-coding-agent`). When omitted, the driver's configured
+   * `defaultThinkingLevel` is used. Drivers that don't support per-call
+   * thinking ignore this field.
+   */
+  thinkingLevel?: RuntimeThinkingLevel;
 }
 
 export interface AttachPeerInput {

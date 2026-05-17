@@ -33,7 +33,9 @@ type SpawnFn = typeof nodeSpawn;
 export interface ClaudeCliDriverOptions {
   spawn?: SpawnFn;
   executable?: string;
+  /** @deprecated Use `defaultSecurityMode`. Legacy values still honored. */
   defaultPermissionMode?: StartSessionInput["permissionMode"];
+  defaultSecurityMode?: StartSessionInput["securityMode"];
 }
 
 export function buildClaudeCliCommand(input: {
@@ -43,6 +45,11 @@ export function buildClaudeCliCommand(input: {
   model?: string;
   name?: string;
   appendSystemPrompt?: string;
+  /**
+   * The literal `--permission-mode` value forwarded to the claude CLI. The
+   * driver resolves this from {@link RuntimeDriverRunInput.securityMode}
+   * (yolo → bypassPermissions, safe → default) before calling.
+   */
   permissionMode?: StartSessionInput["permissionMode"];
   tools?: string[];
   additionalDirectories?: string[];
@@ -99,15 +106,30 @@ export class ClaudeCliDriver implements RuntimeDriver {
 
   private readonly spawnFn: SpawnFn;
   private readonly executable: string;
-  private readonly defaultPermissionMode?: StartSessionInput["permissionMode"];
+  private readonly defaultSecurityMode: NonNullable<StartSessionInput["securityMode"]>;
 
   constructor(options: ClaudeCliDriverOptions = {}) {
     this.spawnFn = options.spawn ?? nodeSpawn;
     this.executable = options.executable ?? process.env.CLAUDE_CLI_EXECUTABLE ?? "claude";
-    this.defaultPermissionMode = options.defaultPermissionMode;
+    // Resolve legacy defaultPermissionMode if no securityMode given.
+    if (options.defaultSecurityMode) {
+      this.defaultSecurityMode = options.defaultSecurityMode;
+    } else if (options.defaultPermissionMode === "bypassPermissions") {
+      this.defaultSecurityMode = "yolo";
+    } else if (options.defaultPermissionMode) {
+      this.defaultSecurityMode = "safe";
+    } else {
+      // Historical default: bypassPermissions (yolo). The non-interactive
+      // stdin (`stdio: ["ignore", ...]`) cannot answer permission prompts,
+      // so "safe" hangs on any tool that needs approval. Callers can opt
+      // into the hang explicitly via securityMode: "safe".
+      this.defaultSecurityMode = "yolo";
+    }
   }
 
   run(input: RuntimeDriverRunInput, onEvent: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+    const securityMode = input.securityMode ?? this.defaultSecurityMode;
+    const permissionMode = securityMode === "yolo" ? "bypassPermissions" : "default";
     const args = buildClaudeCliCommand({
       sessionId: input.sessionId,
       prompt: input.prompt,
@@ -115,10 +137,7 @@ export class ClaudeCliDriver implements RuntimeDriver {
       model: input.model,
       name: input.name,
       appendSystemPrompt: input.appendSystemPrompt,
-      // Default to bypassPermissions for parity with claude-sdk. Without an
-      // explicit mode the CLI may prompt interactively, but stdin is closed
-      // (`stdio: ["ignore", ...]`) so any prompt blocks the child forever.
-      permissionMode: input.permissionMode ?? this.defaultPermissionMode ?? "bypassPermissions",
+      permissionMode,
       tools: input.tools,
       additionalDirectories: input.additionalDirectories,
       resumeSessionId: input.resumeSessionId,

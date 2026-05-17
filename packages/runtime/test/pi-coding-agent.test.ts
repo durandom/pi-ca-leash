@@ -7,6 +7,7 @@ import {
   parsePiCodingAgentEvent,
   PiCodingAgentDriver,
   type PiCodingAgentSessionFactory,
+  type PiCodingAgentSessionFactoryInput,
   type PiCodingAgentSessionLike,
 } from "../src/drivers/pi-coding-agent.js";
 import { ClaudeCodeRuntime } from "../src/runtime.js";
@@ -453,6 +454,163 @@ test("direct driver — kill aborts in-flight prompt and resolves done with SIGI
   const result = await handle.done;
   assert.equal(result.code, 130);
   assert.equal(result.signal, "SIGINT");
+});
+
+// ---------------------------------------------------------------------------
+// Per-call thinkingLevel resolution
+// ---------------------------------------------------------------------------
+
+function makeRecordingFactory(): {
+  factory: PiCodingAgentSessionFactory;
+  inputs: PiCodingAgentSessionFactoryInput[];
+} {
+  const inputs: PiCodingAgentSessionFactoryInput[] = [];
+  const factory: PiCodingAgentSessionFactory = async (input) => {
+    inputs.push(input);
+    let listener: ((event: unknown) => void) | undefined;
+    return {
+      sessionId: "pi-session-tl",
+      subscribe(l) {
+        listener = l;
+        return () => {
+          listener = undefined;
+        };
+      },
+      async prompt(_t) {
+        listener?.({
+          type: "turn_end",
+          message: {
+            role: "assistant",
+            stopReason: "stop",
+            content: [{ type: "text", text: "ok" }],
+            usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+          },
+        });
+      },
+    } satisfies PiCodingAgentSessionLike;
+  };
+  return { factory, inputs };
+}
+
+test("thinkingLevel — per-call value is forwarded to the session factory", async () => {
+  const { factory, inputs } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory, defaultThinkingLevel: "low" });
+  await driver.run(
+    { sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "high" },
+    () => {},
+  ).done;
+  assert.equal(inputs.length, 1);
+  assert.equal(inputs[0]?.thinkingLevel, "high");
+});
+
+test("thinkingLevel — falls back to defaultThinkingLevel when omitted", async () => {
+  const { factory, inputs } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory, defaultThinkingLevel: "medium" });
+  await driver.run({ sessionId: "s", prompt: "p", cwd: "/tmp" }, () => {}).done;
+  assert.equal(inputs[0]?.thinkingLevel, "medium");
+});
+
+test("thinkingLevel — default-of-defaults is 'high' when nothing is configured", async () => {
+  const { factory, inputs } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  await driver.run({ sessionId: "s", prompt: "p", cwd: "/tmp" }, () => {}).done;
+  assert.equal(inputs[0]?.thinkingLevel, "high");
+});
+
+test("thinkingLevel — effective level + source are echoed on the init system event", async () => {
+  const { factory } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory, defaultThinkingLevel: "low" });
+
+  // Per-call override path
+  const perCall: DriverEventEnvelope[] = [];
+  await driver.run(
+    { sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "high" },
+    (e) => { perCall.push(e); },
+  ).done;
+  const initPerCall = perCall.find(
+    (e) => e.type === "message" && e.payload.type === "system" && e.payload.subtype === "init",
+  );
+  assert.ok(initPerCall);
+  const rawPerCall =
+    initPerCall.type === "message" && initPerCall.payload.type === "system"
+      ? (initPerCall.payload.raw as Record<string, unknown>)
+      : {};
+  assert.equal(rawPerCall.thinkingLevel, "high");
+  assert.equal(rawPerCall.thinkingLevelSource, "per-call");
+
+  // Default fallback path
+  const defaulted: DriverEventEnvelope[] = [];
+  await driver.run(
+    { sessionId: "s", prompt: "p", cwd: "/tmp" },
+    (e) => { defaulted.push(e); },
+  ).done;
+  const initDefault = defaulted.find(
+    (e) => e.type === "message" && e.payload.type === "system" && e.payload.subtype === "init",
+  );
+  assert.ok(initDefault);
+  const rawDefault =
+    initDefault.type === "message" && initDefault.payload.type === "system"
+      ? (initDefault.payload.raw as Record<string, unknown>)
+      : {};
+  assert.equal(rawDefault.thinkingLevel, "low");
+  assert.equal(rawDefault.thinkingLevelSource, "default");
+});
+
+test("securityMode — init event echoes requested mode + enforcement note (pi-coding-agent has no native sandbox)", async () => {
+  const { factory } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+
+  const events: DriverEventEnvelope[] = [];
+  await driver.run(
+    { sessionId: "s", prompt: "p", cwd: "/tmp", securityMode: "yolo" },
+    (e) => { events.push(e); },
+  ).done;
+
+  const init = events.find(
+    (e) => e.type === "message" && e.payload.type === "system" && e.payload.subtype === "init",
+  );
+  assert.ok(init);
+  const raw =
+    init.type === "message" && init.payload.type === "system"
+      ? (init.payload.raw as Record<string, unknown>)
+      : {};
+  assert.equal(raw.securityMode, "yolo");
+  assert.equal(raw.securityModeEnforced, false);
+  assert.match(String(raw.securityModeNote), /no native sandbox/i);
+});
+
+test("securityMode — defaults to 'safe' on the init event when caller omits it", async () => {
+  const { factory } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+
+  const events: DriverEventEnvelope[] = [];
+  await driver.run({ sessionId: "s", prompt: "p", cwd: "/tmp" }, (e) => { events.push(e); }).done;
+
+  const init = events.find(
+    (e) => e.type === "message" && e.payload.type === "system" && e.payload.subtype === "init",
+  );
+  const raw =
+    init?.type === "message" && init.payload.type === "system"
+      ? (init.payload.raw as Record<string, unknown>)
+      : {};
+  assert.equal(raw.securityMode, "safe");
+  assert.equal(raw.securityModeEnforced, false);
+});
+
+test("thinkingLevel — runtime.start propagates per-call value through to the driver", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "pi-coding-agent-tl-"));
+  const { factory, inputs } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory, defaultThinkingLevel: "low" });
+  const runtime = new ClaudeCodeRuntime({ storageDir, drivers: { "pi-coding-agent": driver } });
+
+  const session = await runtime.start({
+    prompt: "test",
+    driver: "pi-coding-agent",
+    cwd: "/tmp",
+    thinkingLevel: "high",
+  });
+  await waitForState(runtime, session.sessionId, "idle");
+  assert.equal(inputs[0]?.thinkingLevel, "high");
 });
 
 test("direct driver — delivery ordering preserved for slow handlers", async () => {

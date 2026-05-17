@@ -4,6 +4,19 @@ All notable changes to this repository should be recorded here.
 
 ## Unreleased
 
+### Added
+- Per-call `thinkingLevel` on `LaunchPeerInput`, `StartSessionInput`, `SendMessageInput`, and `RuntimeDriverRunInput` so callers can override the `pi-coding-agent` driver's `defaultThinkingLevel` per peer launch / per turn. Callers that omit the field keep existing behavior (the driver default is used). The `pi-coding-agent` driver now echoes the effective level and its source (`per-call` vs `default`) on the init system event's `raw` payload so downstream consumers can audit what actually landed on the wire vs what was requested. Other drivers ignore the field.
+- `securityMode: "safe" | "yolo"` on `LaunchPeerInput`, `StartSessionInput`, `SendMessageInput`, and `RuntimeDriverRunInput`. Replaces the five-valued `permissionMode` with a coarse two-mode model that maps onto each driver's *native* sandbox / approval flag — pi-ca-leash does not layer additional tool filtering on top. Default is `safe`.
+- `npm run smoke:security` opt-in E2E that exercises the only documented guarantees end-to-end against real `claude` and `codex` binaries: codex `safe` blocks writes outside cwd, codex `yolo` allows them, claude-cli `safe` does not auto-execute Bash.
+
+### Changed
+- `codex-cli` driver: `securityMode: "safe"` passes `--full-auto` (workspace-write sandbox, cwd writable); `securityMode: "yolo"` passes `--dangerously-bypass-approvals-and-sandbox`. The previous PR-floated default of always bypassing the sandbox is reverted — callers that need to write outside cwd (e.g. `git commit` in a linked worktree) must opt in via `yolo`.
+- `claude-sdk` and `claude-cli` drivers: `securityMode: "safe"` maps to `permissionMode: "default"`, `securityMode: "yolo"` maps to `permissionMode: "bypassPermissions"`. On `claude-cli`, the historical default remains `yolo` because the driver runs with `stdio: ["ignore", ...]` and cannot answer interactive permission prompts in `safe`. Document and opt-in if you can tolerate hangs.
+- `pi-coding-agent` driver: ignores `securityMode` (no native sandbox surface) and echoes `{ securityMode, securityModeEnforced: false, securityModeNote }` on the init system event so audit consumers can flag callers relying on a guarantee that does not exist for this driver.
+
+### Deprecated
+- `permissionMode` on `StartSessionInput`/`SendMessageInput`/`LaunchPeerInput`/`RuntimeDriverRunInput`. Resolved internally as: `bypassPermissions` → `yolo`; `default`/`acceptEdits`/`auto` → `safe`; `plan` and `dontAsk` throw. Will be removed in a future release.
+
 ## 0.12.0 - 2026-05-15
 
 ### Fixed

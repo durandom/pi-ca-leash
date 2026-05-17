@@ -756,3 +756,40 @@ test("latest reply extraction returns only the last visible assistant message", 
 
   assert.equal(reply, "final-only");
 });
+
+test("launchPeer forwards thinkingLevel through to the driver", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const driver = new FakeDriver();
+  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver });
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtime,
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  await bridge.launchPeer({
+    name: "worker",
+    prompt: "boot",
+    driver: "claude-sdk",
+    thinkingLevel: "high",
+  });
+
+  assert.equal(driver.runs[0]?.thinkingLevel, "high");
+});
+
+test("launchPeer omits thinkingLevel when caller does not supply one", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const driver = new FakeDriver();
+  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver });
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtime,
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+
+  assert.equal(driver.runs[0]?.thinkingLevel, undefined);
+});

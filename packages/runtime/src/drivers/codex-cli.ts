@@ -29,15 +29,21 @@ export function buildCodexCliCommand(input: {
   model?: string;
   appendSystemPrompt?: string;
   resumeSessionId?: string;
-  permissionMode?: RuntimeDriverRunInput["permissionMode"];
+  securityMode?: RuntimeDriverRunInput["securityMode"];
 }): string[] {
   const effectivePrompt = input.appendSystemPrompt
     ? `<system>\n${input.appendSystemPrompt}\n</system>\n\n${input.prompt}`
     : input.prompt;
 
+  // securityMode mapping:
+  //  - "yolo" → --dangerously-bypass-approvals-and-sandbox (no FS sandbox).
+  //    Required for callers that must write outside cwd, e.g. `git commit`
+  //    in a linked worktree (parent-repo .git/worktrees/<name>/index.lock
+  //    is EROFS under --full-auto). Caller takes responsibility for isolation.
+  //  - "safe" (default) → --full-auto: workspace-write sandbox, cwd writable.
   const args: string[] = ["exec"];
   const automationFlag =
-    input.permissionMode === "bypassPermissions"
+    input.securityMode === "yolo"
       ? "--dangerously-bypass-approvals-and-sandbox"
       : "--full-auto";
   if (input.resumeSessionId) {
@@ -191,18 +197,13 @@ export class CodexCliDriver implements RuntimeDriver {
     if (input.additionalDirectories && input.additionalDirectories.length > 0) {
       throw new RangeError("codex-cli driver does not support additionalDirectories");
     }
-    if (input.permissionMode === "plan" || input.permissionMode === "dontAsk") {
-      throw new RangeError(
-        `codex-cli driver does not support permissionMode=${input.permissionMode}`,
-      );
-    }
     const args = buildCodexCliCommand({
       prompt: input.prompt,
       cwd: input.cwd,
       model: input.model,
       appendSystemPrompt: input.appendSystemPrompt,
       resumeSessionId: input.resumeSessionId,
-      permissionMode: input.permissionMode,
+      securityMode: input.securityMode,
     });
 
     const env: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };

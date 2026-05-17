@@ -306,10 +306,14 @@ export class ClaudeSdkDriver implements RuntimeDriver {
   }
 
   private buildOptions(input: RuntimeDriverRunInput): Record<string, unknown> {
+    // securityMode mapping: yolo → bypassPermissions, safe → default.
+    // Default kept at yolo for historical parity with non-interactive runs.
+    const securityMode = input.securityMode ?? "yolo";
+    const permissionMode = securityMode === "yolo" ? "bypassPermissions" : "default";
     const result: Record<string, unknown> = {
       cwd: input.cwd,
-      permissionMode: input.permissionMode ?? "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
+      permissionMode,
+      allowDangerouslySkipPermissions: securityMode === "yolo",
       settingSources: ["project", "user"],
     };
     if (input.env) {

@@ -62,9 +62,11 @@ export class ClaudeRuntimeIntercomBridge {
       name: input.name,
       appendSystemPrompt: mergeSystemPrompt(input.appendSystemPrompt),
       permissionMode: input.permissionMode,
+      securityMode: input.securityMode,
       tools: input.tools,
       additionalDirectories: input.additionalDirectories,
       env: input.env,
+      thinkingLevel: input.thinkingLevel,
     });
     const peer = this.peerFromStatus(input.name, status, "starting", {
       kind: input.kind ?? "ad-hoc",
