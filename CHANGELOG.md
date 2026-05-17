@@ -4,6 +4,22 @@ All notable changes to this repository should be recorded here.
 
 ## Unreleased
 
+## 0.16.0 - 2026-05-17
+
+### Breaking
+- `RuntimeThinkingLevel` is now Claude's `EffortLevel` (5 values): `"low" | "medium" | "high" | "xhigh" | "max"`. Dropped `"off"` and `"minimal"` from the v0.15 superset. Each driver folds these five values down to its own native vocabulary internally; consumers no longer need to know which value a particular driver understands. Migration: drop `"off"` entirely (omit the field to use the vendor default), replace `"minimal"` with `"low"` (semantically equivalent on every driver under the old fold table).
+
+### Fixed
+- `claude-sdk`, `claude-cli`, and `codex-cli` drivers now actually forward `thinkingLevel` to their underlying SDK/CLI. v0.15 surfaced the value in the type but silently dropped it — three of the four drivers were leaving thinking tokens on the table. Sources verified:
+  - `claude-sdk`: `Options.effort` accepts `low | medium | high | xhigh | max` ([`@anthropic-ai/claude-agent-sdk` exports `EffortLevel`](https://docs.anthropic.com/en/docs/build-with-claude/effort)).
+  - `claude-cli`: `--effort <level>` with the same five values.
+  - `codex-cli`: `-c model_reasoning_effort="..."` TOML config override; OpenAI's `reasoning_effort` enum tops at `"high"`.
+
+### Added
+- Per-driver fold table in `packages/runtime/src/drivers/thinking.ts`. Claude family: passthrough. pi-coding-agent: `xhigh`/`max` → `high` (SDK ladder tops at high). codex-cli: `xhigh`/`max` → `high` (OpenAI tops at high). Folds are intentionally lossy where the vendor surface is narrower; the audit event always echoes both the requested and the effective value.
+- Init-event normalization across all four drivers: every init now carries `thinkingLevelSupported: true`, plus `requestedThinkingLevel` (verbatim caller value) and `effectiveThinkingLevel` (post-fold). On `pi-coding-agent` the fields land on `init.raw`; on the other three drivers they land in `init.metadata`. Consumer code can read the same fields regardless of which driver served the turn.
+- `DRIVER_THINKING_SUPPORTED` registry exported from `drivers/thinking.ts` so consumers can introspect capabilities without round-tripping through an init event.
+
 ## 0.15.0 - 2026-05-17
 
 ### Added

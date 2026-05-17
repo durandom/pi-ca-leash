@@ -1,6 +1,6 @@
 {
   "name": "@pi-claude-code-agent/runtime",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "type": "module",
   "description": "Reusable Claude Code runtime package",
   "files": [
