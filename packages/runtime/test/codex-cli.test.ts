@@ -17,12 +17,22 @@ import type { DriverEventEnvelope, ResultEvent } from "../src/types.js";
 // buildCodexCliCommand
 // ---------------------------------------------------------------------------
 
-// The driver always passes --dangerously-bypass-approvals-and-sandbox
-// (replaces the previous --full-auto default). See the comment on
-// buildCodexCliCommand for the worktree-commit / EROFS rationale.
+// securityMode mapping:
+//   safe (default) → --full-auto (workspace-write sandbox, cwd writable)
+//   yolo           → --dangerously-bypass-approvals-and-sandbox
 
-test("buildCodexCliCommand — fresh run uses --dangerously-bypass-approvals-and-sandbox", () => {
+test("buildCodexCliCommand — fresh run defaults to --full-auto (safe)", () => {
   const args = buildCodexCliCommand({ prompt: "hello", cwd: "/work" });
+  assert.deepEqual(args, ["exec", "--json", "--full-auto", "-C", "/work", "hello"]);
+});
+
+test("buildCodexCliCommand — securityMode=safe is explicit --full-auto", () => {
+  const args = buildCodexCliCommand({ prompt: "hello", cwd: "/work", securityMode: "safe" });
+  assert.deepEqual(args, ["exec", "--json", "--full-auto", "-C", "/work", "hello"]);
+});
+
+test("buildCodexCliCommand — securityMode=yolo disables sandbox", () => {
+  const args = buildCodexCliCommand({ prompt: "hello", cwd: "/work", securityMode: "yolo" });
   assert.deepEqual(args, [
     "exec",
     "--json",
@@ -33,38 +43,23 @@ test("buildCodexCliCommand — fresh run uses --dangerously-bypass-approvals-and
   ]);
 });
 
-test("buildCodexCliCommand — resume run uses --dangerously-bypass-approvals-and-sandbox", () => {
-  const args = buildCodexCliCommand({
+test("buildCodexCliCommand — securityMode is preserved on resume", () => {
+  const yolo = buildCodexCliCommand({
     prompt: "continue",
     cwd: "/work",
     resumeSessionId: "sid-abc",
+    securityMode: "yolo",
   });
-  assert.deepEqual(args, [
-    "exec",
-    "resume",
-    "--json",
-    "--dangerously-bypass-approvals-and-sandbox",
-    "sid-abc",
-    "continue",
-  ]);
-});
-
-test("buildCodexCliCommand — permissionMode=bypassPermissions is a no-op on the flag (already default)", () => {
-  const fresh = buildCodexCliCommand({
-    prompt: "hello",
-    cwd: "/work",
-    permissionMode: "bypassPermissions",
-  });
-  const resume = buildCodexCliCommand({
+  const safe = buildCodexCliCommand({
     prompt: "continue",
     cwd: "/work",
     resumeSessionId: "sid-abc",
-    permissionMode: "bypassPermissions",
+    securityMode: "safe",
   });
-  assert.ok(fresh.includes("--dangerously-bypass-approvals-and-sandbox"));
-  assert.ok(!fresh.includes("--full-auto"));
-  assert.ok(resume.includes("--dangerously-bypass-approvals-and-sandbox"));
-  assert.ok(!resume.includes("--full-auto"));
+  assert.ok(yolo.includes("--dangerously-bypass-approvals-and-sandbox"));
+  assert.ok(!yolo.includes("--full-auto"));
+  assert.ok(safe.includes("--full-auto"));
+  assert.ok(!safe.includes("--dangerously-bypass-approvals-and-sandbox"));
 });
 
 test("buildCodexCliCommand — model and appendSystemPrompt", () => {

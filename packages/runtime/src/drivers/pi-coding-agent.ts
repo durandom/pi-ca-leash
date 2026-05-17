@@ -332,6 +332,11 @@ export class PiCodingAgentDriver implements RuntimeDriver {
           thinkingLevel: effectiveThinkingLevel,
         });
 
+        // pi-coding-agent has no native sandbox. Echo the requested
+        // securityMode and explicitly note it is not enforced, so audit
+        // consumers can flag callers relying on a security guarantee that
+        // does not exist for this driver.
+        const requestedSecurityMode = input.securityMode ?? "safe";
         deliver({
           type: "message",
           payload: {
@@ -344,6 +349,10 @@ export class PiCodingAgentDriver implements RuntimeDriver {
               sessionId: session.sessionId,
               thinkingLevel: effectiveThinkingLevel,
               thinkingLevelSource: input.thinkingLevel ? "per-call" : "default",
+              securityMode: requestedSecurityMode,
+              securityModeEnforced: false,
+              securityModeNote:
+                "pi-coding-agent has no native sandbox; securityMode is echoed for audit but not enforced. Use the `tools` allowlist to limit capability.",
             },
           } satisfies SystemDriverMessage,
         });

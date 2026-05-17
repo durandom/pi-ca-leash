@@ -29,30 +29,23 @@ export function buildCodexCliCommand(input: {
   model?: string;
   appendSystemPrompt?: string;
   resumeSessionId?: string;
-  permissionMode?: RuntimeDriverRunInput["permissionMode"];
+  securityMode?: RuntimeDriverRunInput["securityMode"];
 }): string[] {
   const effectivePrompt = input.appendSystemPrompt
     ? `<system>\n${input.appendSystemPrompt}\n</system>\n\n${input.prompt}`
     : input.prompt;
 
-  // We always pass `--dangerously-bypass-approvals-and-sandbox` instead of
-  // `--full-auto`. `--full-auto` keeps Codex's workspace-write sandbox
-  // active, which binds only the cwd as writable. That breaks legitimate
-  // operations whose state lives outside cwd — notably `git commit` from a
-  // linked worktree, where the index and lock live in the parent repo's
-  // `.git/worktrees/<name>/` directory and the sandbox denies the write
-  // with EROFS on `index.lock`. (Reproduced on codex-cli 0.130.0 with a
-  // throwaway worktree; even adding `--add-dir <parent-gitdir>` did not
-  // unblock the write, so removing the sandbox is the only effective
-  // option from the driver's side.)
-  //
-  // The runtime that consumes pi-ca-leash is expected to provide its own
-  // isolation (per-branch worktrees, dedicated peer processes, etc.). The
-  // `permissionMode` field is kept on `RuntimeDriverRunInput` for API
-  // continuity but no longer switches Codex's sandbox flag; "plan" and
-  // "dontAsk" are still rejected by the driver before spawn.
+  // securityMode mapping:
+  //  - "yolo" → --dangerously-bypass-approvals-and-sandbox (no FS sandbox).
+  //    Required for callers that must write outside cwd, e.g. `git commit`
+  //    in a linked worktree (parent-repo .git/worktrees/<name>/index.lock
+  //    is EROFS under --full-auto). Caller takes responsibility for isolation.
+  //  - "safe" (default) → --full-auto: workspace-write sandbox, cwd writable.
   const args: string[] = ["exec"];
-  const automationFlag = "--dangerously-bypass-approvals-and-sandbox";
+  const automationFlag =
+    input.securityMode === "yolo"
+      ? "--dangerously-bypass-approvals-and-sandbox"
+      : "--full-auto";
   if (input.resumeSessionId) {
     args.push("resume", "--json", automationFlag);
     if (input.model) {
@@ -204,18 +197,13 @@ export class CodexCliDriver implements RuntimeDriver {
     if (input.additionalDirectories && input.additionalDirectories.length > 0) {
       throw new RangeError("codex-cli driver does not support additionalDirectories");
     }
-    if (input.permissionMode === "plan" || input.permissionMode === "dontAsk") {
-      throw new RangeError(
-        `codex-cli driver does not support permissionMode=${input.permissionMode}`,
-      );
-    }
     const args = buildCodexCliCommand({
       prompt: input.prompt,
       cwd: input.cwd,
       model: input.model,
       appendSystemPrompt: input.appendSystemPrompt,
       resumeSessionId: input.resumeSessionId,
-      permissionMode: input.permissionMode,
+      securityMode: input.securityMode,
     });
 
     const env: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };

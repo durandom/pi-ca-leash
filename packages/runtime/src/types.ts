@@ -67,6 +67,35 @@ export interface RuntimeStatus {
 
 export type RuntimeThinkingLevel = "off" | "low" | "medium" | "high";
 
+/**
+ * Coarse security posture. Drivers map this to their native sandbox / approval
+ * flag — pi-ca-leash does NOT enforce tool-level filtering on top.
+ *
+ * - `safe` (default): driver runs with its native sandbox + permission prompts
+ *   (claude-sdk `permissionMode: "default"`, claude-cli `--permission-mode default`,
+ *   codex-cli `--full-auto` workspace-write sandbox).
+ * - `yolo`: driver runs without permission prompts and without sandbox where
+ *   supported (claude-sdk `bypassPermissions`, claude-cli `--dangerously-skip-permissions`,
+ *   codex-cli `--dangerously-bypass-approvals-and-sandbox`).
+ *
+ * `pi-coding-agent` has no native sandbox; the field is ignored and a warning
+ * is echoed on the init system event.
+ */
+export type RuntimeSecurityMode = "safe" | "yolo";
+
+/**
+ * @deprecated Use {@link RuntimeSecurityMode} via `securityMode`.
+ * Legacy values map: `bypassPermissions` → `yolo`; `default`/`acceptEdits`/`auto`
+ * → `safe`. `plan` and `dontAsk` are rejected.
+ */
+export type LegacyPermissionMode =
+  | "acceptEdits"
+  | "auto"
+  | "bypassPermissions"
+  | "default"
+  | "dontAsk"
+  | "plan";
+
 export interface StartSessionInput {
   prompt: string;
   driver?: RuntimeDriverName;
@@ -74,13 +103,9 @@ export interface StartSessionInput {
   model?: string;
   name?: string;
   appendSystemPrompt?: string;
-  permissionMode?:
-    | "acceptEdits"
-    | "auto"
-    | "bypassPermissions"
-    | "default"
-    | "dontAsk"
-    | "plan";
+  /** @deprecated Use `securityMode`. */
+  permissionMode?: LegacyPermissionMode;
+  securityMode?: RuntimeSecurityMode;
   tools?: string[];
   additionalDirectories?: string[];
   env?: Record<string, string>;
@@ -101,6 +126,8 @@ export interface SendMessageInput {
   env?: Record<string, string>;
   /** See {@link StartSessionInput.thinkingLevel}. */
   thinkingLevel?: RuntimeThinkingLevel;
+  /** See {@link StartSessionInput.securityMode}. */
+  securityMode?: RuntimeSecurityMode;
 }
 
 export interface InterruptResult {
@@ -207,7 +234,14 @@ export interface RuntimeDriverRunInput {
   model?: string;
   name?: string;
   appendSystemPrompt?: string;
-  permissionMode?: StartSessionInput["permissionMode"];
+  /** @deprecated Use `securityMode`. Still honored as a fallback. */
+  permissionMode?: LegacyPermissionMode;
+  /**
+   * Resolved coarse security posture. The runtime resolves the effective mode
+   * from caller `securityMode` first, then legacy `permissionMode`, then `safe`.
+   * Drivers should branch only on this field.
+   */
+  securityMode?: RuntimeSecurityMode;
   tools?: string[];
   additionalDirectories?: string[];
   env?: Record<string, string>;

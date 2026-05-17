@@ -183,6 +183,50 @@ test("explicit permissionMode wins over the driver default", () => {
   assert.equal(args[idx + 1], "acceptEdits");
 });
 
+test("ClaudeCliDriver securityMode=safe → --permission-mode default", async () => {
+  let capturedArgs: string[] = [];
+  const fakeSpawn = function(_cmd: string, args: string[], _opts: unknown) {
+    capturedArgs = args;
+    const child = new EventEmitter() as EventEmitter & { stdout: Readable; stderr: Readable; kill: () => void };
+    const stdout = new Readable({ read() {} });
+    const stderr = new Readable({ read() {} });
+    child.stdout = stdout;
+    child.stderr = stderr;
+    child.kill = () => {};
+    setImmediate(() => { stdout.push(null); stderr.push(null); child.emit("close", 0, null); });
+    return child;
+  } as unknown as typeof import("node:child_process").spawn;
+
+  const driver = new ClaudeCliDriver({ spawn: fakeSpawn });
+  const handle = driver.run({ sessionId: "s1", prompt: "noop", cwd: "/tmp", securityMode: "safe" }, () => {});
+  await handle.done;
+
+  const idx = capturedArgs.indexOf("--permission-mode");
+  assert.equal(capturedArgs[idx + 1], "default");
+});
+
+test("ClaudeCliDriver securityMode=yolo → --permission-mode bypassPermissions", async () => {
+  let capturedArgs: string[] = [];
+  const fakeSpawn = function(_cmd: string, args: string[], _opts: unknown) {
+    capturedArgs = args;
+    const child = new EventEmitter() as EventEmitter & { stdout: Readable; stderr: Readable; kill: () => void };
+    const stdout = new Readable({ read() {} });
+    const stderr = new Readable({ read() {} });
+    child.stdout = stdout;
+    child.stderr = stderr;
+    child.kill = () => {};
+    setImmediate(() => { stdout.push(null); stderr.push(null); child.emit("close", 0, null); });
+    return child;
+  } as unknown as typeof import("node:child_process").spawn;
+
+  const driver = new ClaudeCliDriver({ spawn: fakeSpawn });
+  const handle = driver.run({ sessionId: "s1", prompt: "noop", cwd: "/tmp", securityMode: "yolo" }, () => {});
+  await handle.done;
+
+  const idx = capturedArgs.indexOf("--permission-mode");
+  assert.equal(capturedArgs[idx + 1], "bypassPermissions");
+});
+
 test("non-UUID session id is coerced before being passed to --session-id", () => {
   const args = buildClaudeCliCommand({
     sessionId: "bugfix:e2e-scenario-d-claude-cli",

@@ -5,6 +5,7 @@ import type {
   RuntimeEvent,
   RuntimeSessionId,
   RuntimeStatus,
+  RuntimeSecurityMode,
   RuntimeThinkingLevel,
   StartSessionInput,
 } from "@pi-claude-code-agent/runtime";
@@ -49,7 +50,14 @@ export interface LaunchPeerInput {
   cwd?: string;
   model?: string;
   appendSystemPrompt?: string;
+  /** @deprecated Use `securityMode`. */
   permissionMode?: StartSessionInput["permissionMode"];
+  /**
+   * Coarse security posture. `safe` (default) keeps the driver's native
+   * sandbox/permission prompts; `yolo` disables them where the driver
+   * supports it. See runtime `RuntimeSecurityMode` for per-driver details.
+   */
+  securityMode?: RuntimeSecurityMode;
   tools?: string[];
   additionalDirectories?: string[];
   env?: Record<string, string>;

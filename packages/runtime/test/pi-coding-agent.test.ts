@@ -556,6 +556,47 @@ test("thinkingLevel — effective level + source are echoed on the init system e
   assert.equal(rawDefault.thinkingLevelSource, "default");
 });
 
+test("securityMode — init event echoes requested mode + enforcement note (pi-coding-agent has no native sandbox)", async () => {
+  const { factory } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+
+  const events: DriverEventEnvelope[] = [];
+  await driver.run(
+    { sessionId: "s", prompt: "p", cwd: "/tmp", securityMode: "yolo" },
+    (e) => { events.push(e); },
+  ).done;
+
+  const init = events.find(
+    (e) => e.type === "message" && e.payload.type === "system" && e.payload.subtype === "init",
+  );
+  assert.ok(init);
+  const raw =
+    init.type === "message" && init.payload.type === "system"
+      ? (init.payload.raw as Record<string, unknown>)
+      : {};
+  assert.equal(raw.securityMode, "yolo");
+  assert.equal(raw.securityModeEnforced, false);
+  assert.match(String(raw.securityModeNote), /no native sandbox/i);
+});
+
+test("securityMode — defaults to 'safe' on the init event when caller omits it", async () => {
+  const { factory } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+
+  const events: DriverEventEnvelope[] = [];
+  await driver.run({ sessionId: "s", prompt: "p", cwd: "/tmp" }, (e) => { events.push(e); }).done;
+
+  const init = events.find(
+    (e) => e.type === "message" && e.payload.type === "system" && e.payload.subtype === "init",
+  );
+  const raw =
+    init?.type === "message" && init.payload.type === "system"
+      ? (init.payload.raw as Record<string, unknown>)
+      : {};
+  assert.equal(raw.securityMode, "safe");
+  assert.equal(raw.securityModeEnforced, false);
+});
+
 test("thinkingLevel — runtime.start propagates per-call value through to the driver", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "pi-coding-agent-tl-"));
   const { factory, inputs } = makeRecordingFactory();

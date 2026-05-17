@@ -1,6 +1,7 @@
 export { ClaudeCodeRuntime } from "./runtime.js";
 export { RUNTIME_DRIVER_ENV, parseRuntimeDriverName, resolveRuntimeDriverFromEnv } from "./driver-config.js";
 export { PI_CA_LEASH_CONFIG_ENV, defaultConfigPaths, loadPiCaLeashConfigSync, repositoryConfigPath, xdgConfigPath } from "./config.js";
+export { resolveSecurityMode } from "./security-mode.js";
 export { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js";
 export { ClaudeCliDriver, buildClaudeCliCommand } from "./drivers/claude-cli.js";
 export { CodexCliDriver, parseCodexCliEvent, buildCodexCliCommand } from "./drivers/codex-cli.js";
@@ -27,7 +28,9 @@ export type {
   RuntimeSessionId,
   RuntimeSessionState,
   RuntimeStatus,
+  RuntimeSecurityMode,
   RuntimeThinkingLevel,
+  LegacyPermissionMode,
   SendMessageInput,
   StartSessionInput,
   ToolEvent,
