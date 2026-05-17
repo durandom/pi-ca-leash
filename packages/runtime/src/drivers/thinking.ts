@@ -113,17 +113,33 @@ export function enrichInitWithCapabilities(
     ) {
       enriched = true;
       const system = event.payload as SystemDriverMessage;
+      const capabilityFields: Record<string, unknown> = {
+        thinkingLevelSupported: capabilities.thinkingLevelSupported,
+      };
+      if (capabilities.requestedThinkingLevel !== undefined) {
+        capabilityFields.requestedThinkingLevel = capabilities.requestedThinkingLevel;
+      }
+      if (capabilities.effectiveThinkingLevel !== undefined) {
+        capabilityFields.effectiveThinkingLevel = capabilities.effectiveThinkingLevel;
+      }
+      // Write into BOTH metadata and raw. The runtime forwards `raw` into
+      // `status.raw.init` for consumer introspection but currently drops
+      // `metadata` on the floor (see runtime.handleDriverEvent system case).
+      // We keep metadata for driver-level event subscribers and copy into
+      // raw so the same fields survive the runtime layer.
+      const baseRaw =
+        system.raw && typeof system.raw === "object" && !Array.isArray(system.raw)
+          ? (system.raw as Record<string, unknown>)
+          : { upstream: system.raw };
       const merged: SystemDriverMessage = {
         ...system,
         metadata: {
           ...(system.metadata ?? {}),
-          thinkingLevelSupported: capabilities.thinkingLevelSupported,
-          ...(capabilities.requestedThinkingLevel !== undefined
-            ? { requestedThinkingLevel: capabilities.requestedThinkingLevel }
-            : {}),
-          ...(capabilities.effectiveThinkingLevel !== undefined
-            ? { effectiveThinkingLevel: capabilities.effectiveThinkingLevel }
-            : {}),
+          ...capabilityFields,
+        },
+        raw: {
+          ...baseRaw,
+          ...capabilityFields,
         },
       };
       return onEvent({ type: "message", payload: merged });
