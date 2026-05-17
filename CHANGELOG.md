@@ -4,6 +4,8 @@ All notable changes to this repository should be recorded here.
 
 ## Unreleased
 
+## 0.13.0 - 2026-05-17
+
 ### Added
 - Per-call `thinkingLevel` on `LaunchPeerInput`, `StartSessionInput`, `SendMessageInput`, and `RuntimeDriverRunInput` so callers can override the `pi-coding-agent` driver's `defaultThinkingLevel` per peer launch / per turn. Callers that omit the field keep existing behavior (the driver default is used). The `pi-coding-agent` driver now echoes the effective level and its source (`per-call` vs `default`) on the init system event's `raw` payload so downstream consumers can audit what actually landed on the wire vs what was requested. Other drivers ignore the field.
 - `securityMode: "safe" | "yolo"` on `LaunchPeerInput`, `StartSessionInput`, `SendMessageInput`, and `RuntimeDriverRunInput`. Replaces the five-valued `permissionMode` with a coarse two-mode model that maps onto each driver's *native* sandbox / approval flag — pi-ca-leash does not layer additional tool filtering on top. Default is `safe`.
