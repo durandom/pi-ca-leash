@@ -4,6 +4,15 @@ All notable changes to this repository should be recorded here.
 
 ## Unreleased
 
+## 0.16.1 - 2026-05-17
+
+### Fixed
+- `claude-sdk`, `claude-cli`, and `codex-cli` drivers: capability fields (`thinkingLevelSupported`, `requestedThinkingLevel`, `effectiveThinkingLevel`) added in v0.16 via `enrichInitWithCapabilities` were written into `SystemDriverMessage.metadata` only — but the runtime's `handleDriverEvent` system-init handler forwards `message.raw` to `status.raw.init` and drops `metadata` on the floor. Net effect: the capability surface was invisible to consumers for three of the four drivers. The helper now merges the fields into **both** `metadata` (for driver-level event subscribers) and `raw` (so the same fields survive into `status.raw.init`). `pi-coding-agent` was unaffected because it writes the fields directly into its synthetic `raw` payload.
+- Verified end-to-end with `npm run smoke:thinking`: real Anthropic + OpenAI calls produce `thinking` content blocks (claude-sdk, claude-cli) or `reasoning_output_tokens > 0` (codex-cli) when `thinkingLevel: "high"` (or `"max"` for Anthropic, which only engages thinking on non-trivial prompts).
+
+### Added
+- `npm run smoke:thinking` opt-in E2E smoke (`scripts/smoke-thinking.mjs`) that asserts (a) the init capability surface for each driver and (b) that the model actually reasoned (thinking blocks for Anthropic, `reasoning_output_tokens` for OpenAI). Skips a driver when its CLI / SDK / credentials are missing.
+
 ## 0.16.0 - 2026-05-17
 
 ### Breaking

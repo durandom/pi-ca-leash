@@ -1,6 +1,6 @@
 {
   "name": "pi-ca-leash",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "Harness-aware Claude Code and Codex CLI extension for pi",
   "license": "MIT",
   "repository": {
@@ -67,6 +67,7 @@
     "smoke:dev": "npm test && npm run build && npm run smoke:pi:auto",
     "smoke:dev:codex": "npm test && npm run build && npm run smoke:pi:auto:codex",
     "smoke:security": "node ./scripts/smoke-security.mjs",
+    "smoke:thinking": "node ./scripts/smoke-thinking.mjs",
     "smoke:last": "node ./scripts/smoke-artifacts.mjs latest",
     "smoke:clean": "node ./scripts/smoke-artifacts.mjs clean",
     "demo:intercom": "npm run demo --workspace @pi-claude-code-agent/intercom-bridge",
