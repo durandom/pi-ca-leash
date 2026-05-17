@@ -9,6 +9,7 @@ import type {
   ToolUseDriverMessage,
 } from "./messages.js";
 import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, RuntimeDriverRunInput } from "../types.js";
+import { enrichInitWithCapabilities } from "./thinking.js";
 
 function parseJsonOrRaw(value: string): unknown {
   try {
@@ -233,7 +234,13 @@ export function parseClaudeSdkMessage(message: unknown): NormalizedDriverMessage
 export class ClaudeSdkDriver implements RuntimeDriver {
   readonly name = "claude-sdk" as const;
 
-  run(input: RuntimeDriverRunInput, onEvent: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+  run(input: RuntimeDriverRunInput, onEventRaw: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+    // claude-sdk has no per-call thinking knob today; surface the capability
+    // on the upstream init event so audit consumers can detect the
+    // silent-drop failure mode without running a probe (issue #6).
+    const onEvent = enrichInitWithCapabilities(onEventRaw, {
+      thinkingLevelSupported: false,
+    });
     const controller = new AbortController();
 
     const done = (async () => {

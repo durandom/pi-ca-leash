@@ -432,6 +432,27 @@ test("delivery chain — done awaits slow handlers and preserves order", async (
   assert.deepEqual(received, ["system", "assistant", "result"]);
 });
 
+test("thinkingLevel — init event surfaces thinkingLevelSupported: false (codex-cli has no per-call knob, issue #6)", async () => {
+  const lines = [
+    JSON.stringify({ type: "thread.started", thread_id: "t-tl-probe", model: "gpt-5-codex" }),
+    JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "hi" } }),
+    JSON.stringify({ type: "turn.completed", summary: "done" }),
+  ];
+  const driver = new CodexCliDriver({ spawn: makeFakeSpawn(lines, 0) });
+  const events: DriverEventEnvelope[] = [];
+  await driver.run({ sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "high" }, (e) => { events.push(e); }).done;
+
+  const init = events.find(
+    (e) => e.type === "message" && e.payload.type === "system" && e.payload.subtype === "init",
+  );
+  assert.ok(init);
+  const meta = init.type === "message" && init.payload.type === "system"
+    ? init.payload.metadata
+    : undefined;
+  assert.equal(meta?.thinkingLevelSupported, false,
+    "codex-cli must surface thinkingLevelSupported:false so audit consumers can detect silent drop");
+});
+
 // ---------------------------------------------------------------------------
 // Spawn error (e.g. ENOENT) — error envelope + deterministic done
 // ---------------------------------------------------------------------------

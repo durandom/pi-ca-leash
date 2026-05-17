@@ -16,7 +16,12 @@ import type {
   RuntimeDriver,
   RuntimeDriverRunHandle,
   RuntimeDriverRunInput,
+  RuntimeThinkingLevel,
 } from "../types.js";
+import {
+  type PiCodingAgentThinkingLevel,
+  foldThinkingLevelForPiCodingAgent,
+} from "./thinking.js";
 
 // ---------------------------------------------------------------------------
 // AgentSessionEvent → NormalizedDriverMessage translation
@@ -207,11 +212,13 @@ export interface PiCodingAgentSessionFactoryInput {
   appendSystemPrompt?: string;
   resumeSessionId?: string;
   /**
-   * Effective thinking level for this session. Resolved by the driver from
-   * the per-call `RuntimeDriverRunInput.thinkingLevel` with a fallback to
-   * `PiCodingAgentDriverOptions.defaultThinkingLevel`. Always set.
+   * Effective thinking level for this session, in the SDK-native vocabulary.
+   * Resolved by the driver from the per-call `RuntimeDriverRunInput.thinkingLevel`
+   * (folded via `foldThinkingLevelForPiCodingAgent` — `minimal → low`,
+   * `xhigh → high`) with a fallback to `PiCodingAgentDriverOptions.defaultThinkingLevel`.
+   * Always set.
    */
-  thinkingLevel: "off" | "low" | "medium" | "high";
+  thinkingLevel: PiCodingAgentThinkingLevel;
   /**
    * Driver-owned directory for this runtime session's SDK state. Pinning the
    * SDK's `sessionDir` here decouples session lookup from `cwd`, so resume
@@ -229,8 +236,9 @@ export type PiCodingAgentSessionFactory = (
 export interface PiCodingAgentDriverOptions {
   /** Inject a custom session factory (used by tests; otherwise the real SDK is loaded). */
   createSession?: PiCodingAgentSessionFactory;
-  /** Default thinking level when none is configured. */
-  defaultThinkingLevel?: "off" | "low" | "medium" | "high";
+  /** Default thinking level when none is configured. Accepts the runtime
+   * superset; folded to SDK-native via `foldThinkingLevelForPiCodingAgent`. */
+  defaultThinkingLevel?: RuntimeThinkingLevel;
 }
 
 const DEFAULT_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls"];
@@ -299,7 +307,7 @@ export class PiCodingAgentDriver implements RuntimeDriver {
   readonly name = "pi-coding-agent" as const;
 
   private readonly createSession: PiCodingAgentSessionFactory;
-  private readonly defaultThinkingLevel: "off" | "low" | "medium" | "high";
+  private readonly defaultThinkingLevel: RuntimeThinkingLevel;
 
   constructor(options: PiCodingAgentDriverOptions = {}) {
     this.defaultThinkingLevel = options.defaultThinkingLevel ?? "high";
@@ -327,11 +335,16 @@ export class PiCodingAgentDriver implements RuntimeDriver {
       });
     }
 
-    // Resolve per-call thinking level with a fallback to the driver default.
-    // Downstream consumers (e.g. pi-ca-leash event log) can audit what
-    // actually landed on the wire via the `thinkingLevel` field echoed on
-    // the init system event below.
-    const effectiveThinkingLevel = input.thinkingLevel ?? this.defaultThinkingLevel;
+    // Resolve per-call thinking level with a fallback to the driver default,
+    // then fold the runtime superset (`"minimal"`, `"xhigh"`) down to the
+    // SDK's native four-step vocabulary. Both the requested and effective
+    // values are echoed on the init event so audit consumers can detect
+    // silent folds and the silent-drop failure mode (PM-026 / issue #6).
+    const requestedThinkingLevel: RuntimeThinkingLevel =
+      input.thinkingLevel ?? this.defaultThinkingLevel;
+    const effectiveThinkingLevel = foldThinkingLevelForPiCodingAgent(
+      requestedThinkingLevel,
+    );
 
     // Driver-owned session dir. Runtime supplies `sessionStorageDir`
     // (per-session, under storageDir/sessions/<sessionId>); we put the SDK
@@ -380,6 +393,9 @@ export class PiCodingAgentDriver implements RuntimeDriver {
               sessionId: session.sessionId,
               thinkingLevel: effectiveThinkingLevel,
               thinkingLevelSource: input.thinkingLevel ? "per-call" : "default",
+              thinkingLevelSupported: true,
+              requestedThinkingLevel,
+              effectiveThinkingLevel,
               securityMode: requestedSecurityMode,
               securityModeEnforced: false,
               securityModeNote:

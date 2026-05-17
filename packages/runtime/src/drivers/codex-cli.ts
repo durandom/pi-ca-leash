@@ -15,6 +15,7 @@ import type {
   RuntimeDriverRunHandle,
   RuntimeDriverRunInput,
 } from "../types.js";
+import { enrichInitWithCapabilities } from "./thinking.js";
 
 type SpawnFn = typeof nodeSpawn;
 
@@ -188,8 +189,14 @@ export class CodexCliDriver implements RuntimeDriver {
 
   run(
     input: RuntimeDriverRunInput,
-    onEvent: (event: DriverEventEnvelope) => Promise<void> | void,
+    onEventRaw: (event: DriverEventEnvelope) => Promise<void> | void,
   ): RuntimeDriverRunHandle {
+    // codex-cli has no per-call thinking knob today; surface the capability
+    // on the upstream init event so audit consumers can detect the
+    // silent-drop failure mode without running a probe (issue #6).
+    const onEvent = enrichInitWithCapabilities(onEventRaw, {
+      thinkingLevelSupported: false,
+    });
     // Hard-reject unsupported options before spawning
     if (input.tools && input.tools.length > 0) {
       throw new RangeError("codex-cli driver does not support allowedTools");

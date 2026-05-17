@@ -3,6 +3,7 @@ import type { ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, RuntimeDriverRunInput, StartSessionInput } from "../types.js";
 import { parseClaudeSdkMessage } from "./claude-sdk.js";
+import { enrichInitWithCapabilities } from "./thinking.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Fixed namespace for deterministic UUIDv5 derivation of session ids handed to
@@ -127,7 +128,13 @@ export class ClaudeCliDriver implements RuntimeDriver {
     }
   }
 
-  run(input: RuntimeDriverRunInput, onEvent: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+  run(input: RuntimeDriverRunInput, onEventRaw: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+    // claude-cli has no per-call thinking knob today; surface the capability
+    // on the upstream init event so audit consumers can detect the
+    // silent-drop failure mode without running a probe (issue #6).
+    const onEvent = enrichInitWithCapabilities(onEventRaw, {
+      thinkingLevelSupported: false,
+    });
     const securityMode = input.securityMode ?? this.defaultSecurityMode;
     const permissionMode = securityMode === "yolo" ? "bypassPermissions" : "default";
     const args = buildClaudeCliCommand({

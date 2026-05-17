@@ -65,7 +65,22 @@ export interface RuntimeStatus {
   raw?: Record<string, unknown>;
 }
 
-export type RuntimeThinkingLevel = "off" | "low" | "medium" | "high";
+/**
+ * Coarse cross-vendor thinking budget vocabulary. Superset of the four-step
+ * ladder honored by `pi-coding-agent`, extended with `"minimal"` (matches
+ * OpenAI's `reasoning_effort: "minimal"`) and `"xhigh"` (placeholder for
+ * vendor-family budgets above `"high"`). Drivers fold unknown values down
+ * to their native vocabulary; callers can write the vendor value verbatim
+ * without maintaining their own projection helpers. See `drivers/thinking.ts`
+ * for the per-driver fold table.
+ */
+export type RuntimeThinkingLevel =
+  | "off"
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh";
 
 /**
  * Coarse security posture. Drivers map this to their native sandbox / approval

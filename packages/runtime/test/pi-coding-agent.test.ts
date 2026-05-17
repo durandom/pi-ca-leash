@@ -613,6 +613,47 @@ test("thinkingLevel — runtime.start propagates per-call value through to the d
   assert.equal(inputs[0]?.thinkingLevel, "high");
 });
 
+test("thinkingLevel — runtime superset values (minimal, xhigh) fold to SDK-native before reaching the session factory (issue #6)", async () => {
+  const { factory, inputs } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+
+  await driver.run(
+    { sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "minimal" },
+    () => {},
+  ).done;
+  await driver.run(
+    { sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "xhigh" },
+    () => {},
+  ).done;
+
+  // Driver folds "minimal" → "low" and "xhigh" → "high" before the SDK
+  // call, so the upstream pi-coding-agent SDK never sees the superset
+  // vocabulary it doesn't understand.
+  assert.equal(inputs[0]?.thinkingLevel, "low");
+  assert.equal(inputs[1]?.thinkingLevel, "high");
+});
+
+test("thinkingLevel — init event surfaces effectiveThinkingLevel + requested + supported (issue #6)", async () => {
+  const { factory } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+
+  const events: DriverEventEnvelope[] = [];
+  await driver.run(
+    { sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "minimal" },
+    (e) => { events.push(e); },
+  ).done;
+
+  const init = events.find(
+    (e) => e.type === "message" && e.payload.type === "system" && e.payload.subtype === "init",
+  );
+  const raw = init?.type === "message" && init.payload.type === "system"
+    ? (init.payload.raw as Record<string, unknown>)
+    : {};
+  assert.equal(raw.requestedThinkingLevel, "minimal");
+  assert.equal(raw.effectiveThinkingLevel, "low");
+  assert.equal(raw.thinkingLevelSupported, true);
+});
+
 test("resume — driverSessionDir is stable across runs for the same sessionId even when cwd changes (issue #5)", async () => {
   // Regression for https://github.com/durandom/pi-ca-leash/issues/5
   // Callers like spellkave run each turn from a fresh worktree, so cwd
