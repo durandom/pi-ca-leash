@@ -229,6 +229,15 @@ export type RuntimeEvent =
 
 export interface RuntimeDriverRunInput {
   sessionId: RuntimeSessionId;
+  /**
+   * Per-session storage directory owned by the runtime
+   * (`<storageDir>/sessions/<sessionId>`). Drivers MAY place their own
+   * persistent state under a subdirectory here (e.g. SDK session files) so
+   * that resume state survives process restarts and is colocated with the
+   * runtime's state.json / events.jsonl / transcript.jsonl. Optional only so
+   * direct driver tests can omit it; the runtime always supplies it.
+   */
+  sessionStorageDir?: string;
   prompt: string;
   cwd: string;
   model?: string;

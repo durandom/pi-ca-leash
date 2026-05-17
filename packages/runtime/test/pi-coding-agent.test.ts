@@ -613,6 +613,49 @@ test("thinkingLevel — runtime.start propagates per-call value through to the d
   assert.equal(inputs[0]?.thinkingLevel, "high");
 });
 
+test("resume — driverSessionDir is stable across runs for the same sessionId even when cwd changes (issue #5)", async () => {
+  // Regression for https://github.com/durandom/pi-ca-leash/issues/5
+  // Callers like spellkave run each turn from a fresh worktree, so cwd
+  // changes per turn. The SDK's continueRecent(cwd) keys by cwd-encoded
+  // path, which would silently fail to find prior session files. The fix
+  // pins the SDK's sessionDir to a runtime-owned, sessionId-keyed path.
+  const { factory, inputs } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  const storageDir = await mkdtemp(join(tmpdir(), "pi-coding-agent-driverdir-"));
+
+  // Turn 1: cwd = /tmp/worktree-A
+  await driver.run(
+    { sessionId: "stable-uuid", prompt: "p1", cwd: "/tmp/worktree-A",
+      sessionStorageDir: join(storageDir, "sessions", "stable-uuid") },
+    () => {},
+  ).done;
+
+  // Turn 2: SAME runtime sessionId, DIFFERENT cwd (simulating worktree drift)
+  await driver.run(
+    { sessionId: "stable-uuid", prompt: "p2", cwd: "/tmp/worktree-B",
+      sessionStorageDir: join(storageDir, "sessions", "stable-uuid"),
+      resumeSessionId: "stable-uuid" },
+    () => {},
+  ).done;
+
+  assert.equal(inputs.length, 2);
+  // Both runs see the same dir → SDK's continueRecent will look in the
+  // same place where the prior turn wrote, regardless of cwd drift.
+  assert.equal(inputs[0]?.driverSessionDir, inputs[1]?.driverSessionDir);
+  assert.match(inputs[0]?.driverSessionDir ?? "", /stable-uuid\/pi-coding-agent$/);
+});
+
+test("resume — driverSessionDir falls back to per-sessionId tmpdir when runtime omits sessionStorageDir", async () => {
+  // Direct driver tests don't supply sessionStorageDir; the driver must
+  // still pick a stable dir keyed by sessionId so resume works in tests.
+  const { factory, inputs } = makeRecordingFactory();
+  const driver = new PiCodingAgentDriver({ createSession: factory });
+  await driver.run({ sessionId: "no-storage", prompt: "p", cwd: "/tmp" }, () => {}).done;
+  await driver.run({ sessionId: "no-storage", prompt: "p", cwd: "/tmp", resumeSessionId: "no-storage" }, () => {}).done;
+  assert.equal(inputs[0]?.driverSessionDir, inputs[1]?.driverSessionDir);
+  assert.match(inputs[0]?.driverSessionDir ?? "", /no-storage\/pi-coding-agent$/);
+});
+
 test("direct driver — delivery ordering preserved for slow handlers", async () => {
   const received: string[] = [];
   const slowHandler = async (e: DriverEventEnvelope) => {

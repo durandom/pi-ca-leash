@@ -9,6 +9,7 @@ import {
   readEvents,
   readState,
   readTranscript,
+  sessionDir,
   tailTranscript,
   writeState,
 } from "./persistence.js";
@@ -262,6 +263,7 @@ export class ClaudeCodeRuntime {
     const handle = driver.run(
       {
         sessionId: status.sessionId,
+        sessionStorageDir: sessionDir(this.storageDir, status.sessionId),
         prompt: input.prompt,
         cwd: next.cwd,
         model: input.model,

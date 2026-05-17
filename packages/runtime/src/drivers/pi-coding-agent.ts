@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
   AssistantDriverMessage,
   NormalizedDriverMessage,
@@ -187,6 +190,8 @@ export function parsePiCodingAgentEvent(event: unknown): NormalizedDriverMessage
 
 export interface PiCodingAgentSessionLike {
   readonly sessionId: string;
+  /** Absolute path to the SDK's JSONL session file, when persisted. */
+  readonly sessionFile?: string;
   subscribe(listener: (event: unknown) => void): () => void;
   prompt(text: string, options?: { expandPromptTemplates?: boolean }): Promise<void>;
   abort?: () => Promise<void> | void;
@@ -207,6 +212,14 @@ export interface PiCodingAgentSessionFactoryInput {
    * `PiCodingAgentDriverOptions.defaultThinkingLevel`. Always set.
    */
   thinkingLevel: "off" | "low" | "medium" | "high";
+  /**
+   * Driver-owned directory for this runtime session's SDK state. Pinning the
+   * SDK's `sessionDir` here decouples session lookup from `cwd`, so resume
+   * works across worktree-per-turn callers (issue #5) and across process
+   * restarts. Always set by the driver — defaults to a per-sessionId tmpdir
+   * subtree when the runtime doesn't supply `sessionStorageDir`.
+   */
+  driverSessionDir: string;
 }
 
 export type PiCodingAgentSessionFactory = (
@@ -239,14 +252,15 @@ async function defaultCreateSession(
   const { createAgentSession, AuthStorage, ModelRegistry, SessionManager } = sdk;
   const modelRegistry = input.model ? ModelRegistry.create(AuthStorage.create()) : undefined;
   const model = input.model && modelRegistry ? resolvePiModel(modelRegistry, input.model) : undefined;
-  // When the runtime hands us a resumeSessionId, restore the most recent
-  // SDK session for this cwd so subsequent prompts inherit the prior
-  // conversation history. The SDK keys session files by cwd-encoded path
-  // under ~/.pi/agent/sessions/, and pi-ca-leash peers have a stable cwd
-  // per peer name — so continueRecent(cwd) reliably picks the right one.
+  // Pin the SDK's session dir to a runtime-owned, sessionId-keyed path. The
+  // SDK's default lookup keys by cwd, which breaks under callers that run
+  // each turn from a fresh worktree (issue #5: continueRecent looks in a
+  // different directory than the previous turn wrote to). By providing the
+  // dir explicitly we make resume cwd-independent: same runtime sessionId
+  // → same SDK session file → same conversation history across processes.
   const sessionManager = input.resumeSessionId
-    ? SessionManager.continueRecent(input.cwd)
-    : undefined;
+    ? SessionManager.continueRecent(input.cwd, input.driverSessionDir)
+    : SessionManager.create(input.cwd, input.driverSessionDir);
   const { session } = await createAgentSession({
     cwd: input.cwd,
     tools: input.tools ?? DEFAULT_TOOLS,
@@ -319,6 +333,16 @@ export class PiCodingAgentDriver implements RuntimeDriver {
     // the init system event below.
     const effectiveThinkingLevel = input.thinkingLevel ?? this.defaultThinkingLevel;
 
+    // Driver-owned session dir. Runtime supplies `sessionStorageDir`
+    // (per-session, under storageDir/sessions/<sessionId>); we put the SDK
+    // session files under a `pi-coding-agent/` subfolder so they don't
+    // collide with the runtime's own state/event files. When the input has
+    // no `sessionStorageDir` (direct driver tests), fall back to a per-
+    // sessionId tmpdir subtree so resume still works within a test run.
+    const baseDir = input.sessionStorageDir
+      ?? join(tmpdir(), "pi-ca-leash-driver", input.sessionId);
+    const driverSessionDir = join(baseDir, "pi-coding-agent");
+
     const done = (async () => {
       try {
         session = await this.createSession({
@@ -330,6 +354,7 @@ export class PiCodingAgentDriver implements RuntimeDriver {
           appendSystemPrompt: input.appendSystemPrompt,
           resumeSessionId: input.resumeSessionId,
           thinkingLevel: effectiveThinkingLevel,
+          driverSessionDir,
         });
 
         // pi-coding-agent has no native sandbox. Echo the requested
@@ -337,6 +362,12 @@ export class PiCodingAgentDriver implements RuntimeDriver {
         // consumers can flag callers relying on a security guarantee that
         // does not exist for this driver.
         const requestedSecurityMode = input.securityMode ?? "safe";
+        // Resume only counts as successful if the SDK actually loaded a prior
+        // session file off disk. continueRecent silently falls back to a
+        // fresh session when nothing is there, so we have to check the file.
+        const resumed = Boolean(
+          input.resumeSessionId && existsSync(session.sessionFile ?? ""),
+        );
         deliver({
           type: "message",
           payload: {
@@ -353,6 +384,10 @@ export class PiCodingAgentDriver implements RuntimeDriver {
               securityModeEnforced: false,
               securityModeNote:
                 "pi-coding-agent has no native sandbox; securityMode is echoed for audit but not enforced. Use the `tools` allowlist to limit capability.",
+              resumeSupported: true,
+              resumeRequested: Boolean(input.resumeSessionId),
+              resumed,
+              driverSessionDir,
             },
           } satisfies SystemDriverMessage,
         });
