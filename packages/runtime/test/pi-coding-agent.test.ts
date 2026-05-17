@@ -613,33 +613,33 @@ test("thinkingLevel — runtime.start propagates per-call value through to the d
   assert.equal(inputs[0]?.thinkingLevel, "high");
 });
 
-test("thinkingLevel — runtime superset values (minimal, xhigh) fold to SDK-native before reaching the session factory (issue #6)", async () => {
+test("thinkingLevel — xhigh and max fold down to high before reaching the SDK (pi-coding-agent ladder tops at high)", async () => {
   const { factory, inputs } = makeRecordingFactory();
   const driver = new PiCodingAgentDriver({ createSession: factory });
 
   await driver.run(
-    { sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "minimal" },
-    () => {},
-  ).done;
-  await driver.run(
     { sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "xhigh" },
     () => {},
   ).done;
+  await driver.run(
+    { sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "max" },
+    () => {},
+  ).done;
 
-  // Driver folds "minimal" → "low" and "xhigh" → "high" before the SDK
-  // call, so the upstream pi-coding-agent SDK never sees the superset
-  // vocabulary it doesn't understand.
-  assert.equal(inputs[0]?.thinkingLevel, "low");
+  // The pi-coding-agent SDK only knows off/low/medium/high; the driver
+  // folds the upper vendor budgets down so the underlying SDK never sees
+  // a vocabulary it does not understand.
+  assert.equal(inputs[0]?.thinkingLevel, "high");
   assert.equal(inputs[1]?.thinkingLevel, "high");
 });
 
-test("thinkingLevel — init event surfaces effectiveThinkingLevel + requested + supported (issue #6)", async () => {
+test("thinkingLevel — init event surfaces effectiveThinkingLevel + requested + supported", async () => {
   const { factory } = makeRecordingFactory();
   const driver = new PiCodingAgentDriver({ createSession: factory });
 
   const events: DriverEventEnvelope[] = [];
   await driver.run(
-    { sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "minimal" },
+    { sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "xhigh" },
     (e) => { events.push(e); },
   ).done;
 
@@ -649,8 +649,10 @@ test("thinkingLevel — init event surfaces effectiveThinkingLevel + requested +
   const raw = init?.type === "message" && init.payload.type === "system"
     ? (init.payload.raw as Record<string, unknown>)
     : {};
-  assert.equal(raw.requestedThinkingLevel, "minimal");
-  assert.equal(raw.effectiveThinkingLevel, "low");
+  // Audit consumers see both the verbatim caller value and the folded
+  // value the SDK actually received, so silent downgrades are visible.
+  assert.equal(raw.requestedThinkingLevel, "xhigh");
+  assert.equal(raw.effectiveThinkingLevel, "high");
   assert.equal(raw.thinkingLevelSupported, true);
 });
 

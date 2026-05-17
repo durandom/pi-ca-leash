@@ -342,9 +342,9 @@ export class PiCodingAgentDriver implements RuntimeDriver {
     // silent folds and the silent-drop failure mode (PM-026 / issue #6).
     const requestedThinkingLevel: RuntimeThinkingLevel =
       input.thinkingLevel ?? this.defaultThinkingLevel;
-    const effectiveThinkingLevel = foldThinkingLevelForPiCodingAgent(
-      requestedThinkingLevel,
-    );
+    // pi-coding-agent's SDK ladder tops at "high"; xhigh/max fold down.
+    const effectiveThinkingLevel: PiCodingAgentThinkingLevel =
+      foldThinkingLevelForPiCodingAgent(requestedThinkingLevel);
 
     // Driver-owned session dir. Runtime supplies `sessionStorageDir`
     // (per-session, under storageDir/sessions/<sessionId>); we put the SDK

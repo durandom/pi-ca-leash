@@ -89,6 +89,29 @@ test("buildClaudeCliCommand terminates variadic flags with `--` before prompt", 
   assert.ok(args.indexOf("--allowedTools") < dashDash);
 });
 
+test("buildClaudeCliCommand forwards --effort when the runtime thinkingLevel is set (folded to native Claude vocab)", () => {
+  for (const level of ["low", "medium", "high", "xhigh", "max"] as const) {
+    const args = buildClaudeCliCommand({
+      sessionId: "550e8400-e29b-41d4-a716-446655440000",
+      prompt: "p",
+      cwd: "/tmp",
+      effort: level,
+    });
+    const idx = args.indexOf("--effort");
+    assert.notEqual(idx, -1, `expected --effort for level=${level}`);
+    assert.equal(args[idx + 1], level);
+  }
+});
+
+test("buildClaudeCliCommand omits --effort when no thinkingLevel is set (use vendor default)", () => {
+  const args = buildClaudeCliCommand({
+    sessionId: "550e8400-e29b-41d4-a716-446655440000",
+    prompt: "p",
+    cwd: "/tmp",
+  });
+  assert.equal(args.indexOf("--effort"), -1);
+});
+
 function makeFakeSpawn(lines: string[], exitCode = 0) {
   return function fakeSpawn(_cmd: string, _args: string[], _opts: unknown) {
     const child = new EventEmitter() as EventEmitter & {

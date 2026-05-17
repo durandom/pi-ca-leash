@@ -15,7 +15,7 @@ import type {
   RuntimeDriverRunHandle,
   RuntimeDriverRunInput,
 } from "../types.js";
-import { enrichInitWithCapabilities } from "./thinking.js";
+import { enrichInitWithCapabilities, foldThinkingLevelForCodex } from "./thinking.js";
 
 type SpawnFn = typeof nodeSpawn;
 
@@ -31,6 +31,8 @@ export function buildCodexCliCommand(input: {
   appendSystemPrompt?: string;
   resumeSessionId?: string;
   securityMode?: RuntimeDriverRunInput["securityMode"];
+  /** Native OpenAI reasoning_effort vocabulary; runtime driver folds before calling. */
+  reasoningEffort?: "minimal" | "low" | "medium" | "high";
 }): string[] {
   const effectivePrompt = input.appendSystemPrompt
     ? `<system>\n${input.appendSystemPrompt}\n</system>\n\n${input.prompt}`
@@ -43,12 +45,17 @@ export function buildCodexCliCommand(input: {
   //    is EROFS under --full-auto). Caller takes responsibility for isolation.
   //  - "safe" (default) → --full-auto: workspace-write sandbox, cwd writable.
   const args: string[] = ["exec"];
+  // reasoning_effort is a TOML config key, surfaced via -c key=value overrides.
+  // Must precede subcommand-specific flags so codex parses it as a global.
+  const reasoningArgs = input.reasoningEffort
+    ? ["-c", `model_reasoning_effort="${input.reasoningEffort}"`]
+    : [];
   const automationFlag =
     input.securityMode === "yolo"
       ? "--dangerously-bypass-approvals-and-sandbox"
       : "--full-auto";
   if (input.resumeSessionId) {
-    args.push("resume", "--json", automationFlag);
+    args.push("resume", ...reasoningArgs, "--json", automationFlag);
     if (input.model) {
       args.push("-m", input.model);
     }
@@ -56,7 +63,7 @@ export function buildCodexCliCommand(input: {
     return args;
   }
 
-  args.push("--json", automationFlag, "-C", input.cwd);
+  args.push(...reasoningArgs, "--json", automationFlag, "-C", input.cwd);
   if (input.model) {
     args.push("-m", input.model);
   }
@@ -191,11 +198,16 @@ export class CodexCliDriver implements RuntimeDriver {
     input: RuntimeDriverRunInput,
     onEventRaw: (event: DriverEventEnvelope) => Promise<void> | void,
   ): RuntimeDriverRunHandle {
-    // codex-cli has no per-call thinking knob today; surface the capability
-    // on the upstream init event so audit consumers can detect the
-    // silent-drop failure mode without running a probe (issue #6).
+    // Echo effective thinking on the upstream init event. codex-cli forwards
+    // via the TOML config override `-c model_reasoning_effort=...` (OpenAI's
+    // reasoning_effort enum tops at `high`; runtime `xhigh`/`max` fold down).
+    const reasoningEffort = input.thinkingLevel
+      ? foldThinkingLevelForCodex(input.thinkingLevel)
+      : undefined;
     const onEvent = enrichInitWithCapabilities(onEventRaw, {
-      thinkingLevelSupported: false,
+      thinkingLevelSupported: true,
+      requestedThinkingLevel: input.thinkingLevel,
+      effectiveThinkingLevel: reasoningEffort,
     });
     // Hard-reject unsupported options before spawning
     if (input.tools && input.tools.length > 0) {
@@ -211,6 +223,7 @@ export class CodexCliDriver implements RuntimeDriver {
       appendSystemPrompt: input.appendSystemPrompt,
       resumeSessionId: input.resumeSessionId,
       securityMode: input.securityMode,
+      reasoningEffort,
     });
 
     const env: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };

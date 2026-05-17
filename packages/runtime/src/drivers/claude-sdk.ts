@@ -9,7 +9,7 @@ import type {
   ToolUseDriverMessage,
 } from "./messages.js";
 import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, RuntimeDriverRunInput } from "../types.js";
-import { enrichInitWithCapabilities } from "./thinking.js";
+import { enrichInitWithCapabilities, foldThinkingLevelForClaude } from "./thinking.js";
 
 function parseJsonOrRaw(value: string): unknown {
   try {
@@ -235,11 +235,18 @@ export class ClaudeSdkDriver implements RuntimeDriver {
   readonly name = "claude-sdk" as const;
 
   run(input: RuntimeDriverRunInput, onEventRaw: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
-    // claude-sdk has no per-call thinking knob today; surface the capability
-    // on the upstream init event so audit consumers can detect the
-    // silent-drop failure mode without running a probe (issue #6).
+    // Echo the effective thinking budget on the upstream init event so audit
+    // consumers can detect silent drops / folds without a probe. The fold is
+    // an identity here (Claude SDK uses the runtime vocabulary natively) but
+    // we record it explicitly to keep the audit surface uniform across
+    // drivers (issues #6, follow-up).
+    const effort = input.thinkingLevel
+      ? foldThinkingLevelForClaude(input.thinkingLevel)
+      : undefined;
     const onEvent = enrichInitWithCapabilities(onEventRaw, {
-      thinkingLevelSupported: false,
+      thinkingLevelSupported: true,
+      requestedThinkingLevel: input.thinkingLevel,
+      effectiveThinkingLevel: effort,
     });
     const controller = new AbortController();
 
@@ -337,6 +344,10 @@ export class ClaudeSdkDriver implements RuntimeDriver {
     }
     if (input.appendSystemPrompt != null) {
       result.systemPrompt = { type: "preset", preset: "claude_code", append: input.appendSystemPrompt };
+    }
+    if (input.thinkingLevel) {
+      // Claude SDK option name is `effort`; vocabulary matches runtime.
+      result.effort = foldThinkingLevelForClaude(input.thinkingLevel);
     }
     if (input.tools?.length) {
       result.allowedTools = input.tools;

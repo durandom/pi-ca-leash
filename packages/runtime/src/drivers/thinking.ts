@@ -1,57 +1,107 @@
 import type { DriverEventEnvelope, RuntimeThinkingLevel } from "../types.js";
 import type { SystemDriverMessage } from "./messages.js";
 
-/** SDK-native vocabulary for `pi-coding-agent`'s `thinkingLevel` option. */
+// ---------------------------------------------------------------------------
+// Per-driver fold tables
+// ---------------------------------------------------------------------------
+//
+// `RuntimeThinkingLevel` is Claude's `EffortLevel` (`low / medium / high /
+// xhigh / max`). Each driver projects to its native vocabulary so the
+// consumer never has to know which value a particular driver understands.
+// Folds are intentionally lossy where vendor surfaces are narrower (e.g.
+// pi-coding-agent's SDK + OpenAI's reasoning_effort both top out at
+// `high`); the audit surface on the init event always echoes both the
+// requested and the effective value so consumers can detect downgrades.
+
+/** SDK-native vocabulary for `pi-coding-agent`'s `thinkingLevel`. */
 export type PiCodingAgentThinkingLevel = "off" | "low" | "medium" | "high";
 
-/**
- * Fold the runtime's superset vocabulary down to `pi-coding-agent`'s native
- * four-step ladder. Callers can configure the vendor-native value
- * (`"minimal"`, `"xhigh"`) verbatim; the driver projects it before handing
- * to the SDK. Documented per-driver in CHANGELOG.
- */
+/** SDK-native `EffortLevel` exposed by `@anthropic-ai/claude-agent-sdk`. */
+export type ClaudeEffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
+/** Codex CLI's `model_reasoning_effort` accepts OpenAI's reasoning_effort enum. */
+export type CodexReasoningEffort = "minimal" | "low" | "medium" | "high";
+
 export function foldThinkingLevelForPiCodingAgent(
   level: RuntimeThinkingLevel,
 ): PiCodingAgentThinkingLevel {
   switch (level) {
-    case "off":
-      return "off";
-    case "minimal":
     case "low":
       return "low";
     case "medium":
       return "medium";
     case "high":
     case "xhigh":
+    case "max":
       return "high";
   }
 }
 
+export function foldThinkingLevelForClaude(
+  level: RuntimeThinkingLevel,
+): ClaudeEffortLevel {
+  // Native — passthrough.
+  return level;
+}
+
+export function foldThinkingLevelForCodex(
+  level: RuntimeThinkingLevel,
+): CodexReasoningEffort {
+  switch (level) {
+    case "low":
+      return "low";
+    case "medium":
+      return "medium";
+    case "high":
+    case "xhigh":
+    case "max":
+      return "high";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Capability registry
+// ---------------------------------------------------------------------------
+
 /**
- * Which drivers consume `RuntimeDriverRunInput.thinkingLevel` and forward it
- * to the model. Surfaced on the init system event as
- * `metadata.thinkingLevelSupported` so audit consumers can detect the
- * silent-drop failure mode (e.g. PM-026 in spellkave) without running a
- * synthetic latency/usage probe. Update this table when a driver gains a
- * per-call thinking knob.
+ * Whether the driver forwards `RuntimeDriverRunInput.thinkingLevel` to its
+ * underlying SDK/CLI. Surfaced on the init system event as
+ * `metadata.thinkingLevelSupported` (and `init.raw.thinkingLevelSupported`
+ * on `pi-coding-agent`) so audit consumers can detect the silent-drop
+ * failure mode without running a synthetic probe. All four built-in
+ * drivers now forward — kept as a table so future drivers can opt out
+ * explicitly and so consumers have a single place to inspect.
  */
 export const DRIVER_THINKING_SUPPORTED: Record<string, boolean> = {
   "pi-coding-agent": true,
-  "claude-sdk": false,
-  "claude-cli": false,
-  "codex-cli": false,
+  "claude-sdk": true,
+  "claude-cli": true,
+  "codex-cli": true,
 };
+
+// ---------------------------------------------------------------------------
+// Init-event enrichment — shared across non-pi-coding-agent drivers
+// ---------------------------------------------------------------------------
+
+export interface InitCapabilityFields {
+  /** Whether this driver forwards thinkingLevel to its SDK/CLI. */
+  thinkingLevelSupported: boolean;
+  /** Verbatim caller value (or driver default), pre-fold. */
+  requestedThinkingLevel?: RuntimeThinkingLevel;
+  /** Value actually handed to the SDK/CLI after the per-driver fold. */
+  effectiveThinkingLevel?: string;
+}
 
 /**
  * Wrap an `onEvent` callback so the first `system/init` message it sees
- * gets enriched with `thinkingLevelSupported` and `effectiveThinkingLevel`
- * fields in its `metadata`. Used by drivers that forward an upstream init
- * (claude-sdk, claude-cli, codex-cli); `pi-coding-agent` builds its init
- * synthetically and sets the fields directly.
+ * gets enriched with capability fields in its `metadata`. Used by drivers
+ * that forward an upstream init (claude-sdk, claude-cli, codex-cli);
+ * `pi-coding-agent` builds its init synthetically and sets the fields
+ * directly on `init.raw`.
  */
 export function enrichInitWithCapabilities(
   onEvent: (event: DriverEventEnvelope) => Promise<void> | void,
-  capabilities: { thinkingLevelSupported: boolean; effectiveThinkingLevel?: string },
+  capabilities: InitCapabilityFields,
 ): (event: DriverEventEnvelope) => Promise<void> | void {
   let enriched = false;
   return (event) => {
@@ -68,6 +118,9 @@ export function enrichInitWithCapabilities(
         metadata: {
           ...(system.metadata ?? {}),
           thinkingLevelSupported: capabilities.thinkingLevelSupported,
+          ...(capabilities.requestedThinkingLevel !== undefined
+            ? { requestedThinkingLevel: capabilities.requestedThinkingLevel }
+            : {}),
           ...(capabilities.effectiveThinkingLevel !== undefined
             ? { effectiveThinkingLevel: capabilities.effectiveThinkingLevel }
             : {}),

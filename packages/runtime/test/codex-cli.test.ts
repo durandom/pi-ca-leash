@@ -432,25 +432,38 @@ test("delivery chain — done awaits slow handlers and preserves order", async (
   assert.deepEqual(received, ["system", "assistant", "result"]);
 });
 
-test("thinkingLevel — init event surfaces thinkingLevelSupported: false (codex-cli has no per-call knob, issue #6)", async () => {
+test("thinkingLevel — codex-cli forwards `-c model_reasoning_effort=...` and surfaces request/effective/supported on init", async () => {
   const lines = [
     JSON.stringify({ type: "thread.started", thread_id: "t-tl-probe", model: "gpt-5-codex" }),
     JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "hi" } }),
     JSON.stringify({ type: "turn.completed", summary: "done" }),
   ];
-  const driver = new CodexCliDriver({ spawn: makeFakeSpawn(lines, 0) });
+  let spawnedArgs: string[] | undefined;
+  const captureSpawn: typeof import("node:child_process").spawn = ((cmd: string, args: string[], opts: unknown) => {
+    spawnedArgs = args;
+    return (makeFakeSpawn(lines, 0) as unknown as (c: string, a: string[], o: unknown) => unknown)(cmd, args, opts);
+  }) as unknown as typeof import("node:child_process").spawn;
+  const driver = new CodexCliDriver({ spawn: captureSpawn });
   const events: DriverEventEnvelope[] = [];
-  await driver.run({ sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "high" }, (e) => { events.push(e); }).done;
+  await driver.run({ sessionId: "s", prompt: "p", cwd: "/tmp", thinkingLevel: "xhigh" }, (e) => { events.push(e); }).done;
+
+  // CLI plumbing: codex forwards via the TOML config override.
+  // OpenAI's reasoning_effort tops at "high"; xhigh folds down.
+  assert.ok(spawnedArgs?.includes("-c"));
+  assert.ok(
+    spawnedArgs?.some((a) => a === 'model_reasoning_effort="high"'),
+    `expected model_reasoning_effort="high" in args, got: ${spawnedArgs?.join(" ")}`,
+  );
 
   const init = events.find(
     (e) => e.type === "message" && e.payload.type === "system" && e.payload.subtype === "init",
   );
-  assert.ok(init);
-  const meta = init.type === "message" && init.payload.type === "system"
+  const meta = init?.type === "message" && init.payload.type === "system"
     ? init.payload.metadata
     : undefined;
-  assert.equal(meta?.thinkingLevelSupported, false,
-    "codex-cli must surface thinkingLevelSupported:false so audit consumers can detect silent drop");
+  assert.equal(meta?.thinkingLevelSupported, true);
+  assert.equal(meta?.requestedThinkingLevel, "xhigh");
+  assert.equal(meta?.effectiveThinkingLevel, "high");
 });
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   enrichInitWithCapabilities,
+  foldThinkingLevelForClaude,
+  foldThinkingLevelForCodex,
   foldThinkingLevelForPiCodingAgent,
 } from "../src/drivers/thinking.js";
 import type { DriverEventEnvelope } from "../src/types.js";
@@ -10,19 +12,31 @@ import type { DriverEventEnvelope } from "../src/types.js";
 // foldThinkingLevelForPiCodingAgent — covers issue #6's superset → native fold
 // ---------------------------------------------------------------------------
 
-test("fold — passes through native four-step ladder unchanged", () => {
-  assert.equal(foldThinkingLevelForPiCodingAgent("off"), "off");
+test("pi-coding-agent fold — passes through low/medium/high unchanged", () => {
   assert.equal(foldThinkingLevelForPiCodingAgent("low"), "low");
   assert.equal(foldThinkingLevelForPiCodingAgent("medium"), "medium");
   assert.equal(foldThinkingLevelForPiCodingAgent("high"), "high");
 });
 
-test("fold — minimal folds down to low (matches OpenAI reasoning_effort: 'minimal')", () => {
-  assert.equal(foldThinkingLevelForPiCodingAgent("minimal"), "low");
+test("pi-coding-agent fold — xhigh and max fold to high (SDK ladder tops at high)", () => {
+  assert.equal(foldThinkingLevelForPiCodingAgent("xhigh"), "high");
+  assert.equal(foldThinkingLevelForPiCodingAgent("max"), "high");
 });
 
-test("fold — xhigh folds down to high (placeholder for above-high vendor budgets)", () => {
-  assert.equal(foldThinkingLevelForPiCodingAgent("xhigh"), "high");
+test("claude fold — passthrough all five values (native vocab)", () => {
+  assert.equal(foldThinkingLevelForClaude("low"), "low");
+  assert.equal(foldThinkingLevelForClaude("medium"), "medium");
+  assert.equal(foldThinkingLevelForClaude("high"), "high");
+  assert.equal(foldThinkingLevelForClaude("xhigh"), "xhigh");
+  assert.equal(foldThinkingLevelForClaude("max"), "max");
+});
+
+test("codex fold — xhigh and max fold to high (OpenAI reasoning_effort tops at high)", () => {
+  assert.equal(foldThinkingLevelForCodex("low"), "low");
+  assert.equal(foldThinkingLevelForCodex("medium"), "medium");
+  assert.equal(foldThinkingLevelForCodex("high"), "high");
+  assert.equal(foldThinkingLevelForCodex("xhigh"), "high");
+  assert.equal(foldThinkingLevelForCodex("max"), "high");
 });
 
 // ---------------------------------------------------------------------------

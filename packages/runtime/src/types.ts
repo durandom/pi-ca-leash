@@ -66,21 +66,23 @@ export interface RuntimeStatus {
 }
 
 /**
- * Coarse cross-vendor thinking budget vocabulary. Superset of the four-step
- * ladder honored by `pi-coding-agent`, extended with `"minimal"` (matches
- * OpenAI's `reasoning_effort: "minimal"`) and `"xhigh"` (placeholder for
- * vendor-family budgets above `"high"`). Drivers fold unknown values down
- * to their native vocabulary; callers can write the vendor value verbatim
- * without maintaining their own projection helpers. See `drivers/thinking.ts`
- * for the per-driver fold table.
+ * Canonical cross-driver thinking budget vocabulary. Five values, taken
+ * verbatim from Anthropic's `EffortLevel` (the most expressive surface of
+ * the three driver families pi-ca-leash currently supports). Every driver
+ * accepts the same values from the consumer; each driver folds them to its
+ * own native vocabulary internally (see `drivers/thinking.ts`).
+ *
+ * Folds applied per driver:
+ *   - `claude-sdk`, `claude-cli`: passthrough (native vocab).
+ *   - `pi-coding-agent`: `xhigh → high`, `max → high` (SDK ladder tops at high).
+ *   - `codex-cli` (OpenAI): `xhigh → high`, `max → high` (OpenAI tops at high).
+ *
+ * Omit the field entirely to use each driver's vendor default (no `"off"`
+ * value — Claude / OpenAI / pi all default to a reasonable budget when the
+ * flag is absent, and the explicit-off semantics differ enough that a
+ * canonical mapping would be misleading).
  */
-export type RuntimeThinkingLevel =
-  | "off"
-  | "minimal"
-  | "low"
-  | "medium"
-  | "high"
-  | "xhigh";
+export type RuntimeThinkingLevel = "low" | "medium" | "high" | "xhigh" | "max";
 
 /**
  * Coarse security posture. Drivers map this to their native sandbox / approval

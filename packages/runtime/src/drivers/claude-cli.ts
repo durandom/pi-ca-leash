@@ -3,7 +3,7 @@ import type { ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, RuntimeDriverRunInput, StartSessionInput } from "../types.js";
 import { parseClaudeSdkMessage } from "./claude-sdk.js";
-import { enrichInitWithCapabilities } from "./thinking.js";
+import { enrichInitWithCapabilities, foldThinkingLevelForClaude } from "./thinking.js";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Fixed namespace for deterministic UUIDv5 derivation of session ids handed to
@@ -55,6 +55,8 @@ export function buildClaudeCliCommand(input: {
   tools?: string[];
   additionalDirectories?: string[];
   resumeSessionId?: string;
+  /** Native claude CLI vocabulary; runtime driver folds before calling. */
+  effort?: "low" | "medium" | "high" | "xhigh" | "max";
 }): string[] {
   // --verbose is REQUIRED by claude when combining --print with
   // --output-format=stream-json; without it the CLI exits 1 with
@@ -85,6 +87,9 @@ export function buildClaudeCliCommand(input: {
   }
   if (input.additionalDirectories?.length) {
     args.push("--add-dir", ...input.additionalDirectories);
+  }
+  if (input.effort) {
+    args.push("--effort", input.effort);
   }
 
   // Terminate variadic flags (--allowedTools, --add-dir) before the
@@ -129,11 +134,16 @@ export class ClaudeCliDriver implements RuntimeDriver {
   }
 
   run(input: RuntimeDriverRunInput, onEventRaw: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
-    // claude-cli has no per-call thinking knob today; surface the capability
-    // on the upstream init event so audit consumers can detect the
-    // silent-drop failure mode without running a probe (issue #6).
+    // Echo effective thinking on the upstream init event so audit consumers
+    // can detect silent drops/folds without a probe. claude CLI flag is
+    // `--effort <level>` with native vocab matching the runtime vocabulary.
+    const effort = input.thinkingLevel
+      ? foldThinkingLevelForClaude(input.thinkingLevel)
+      : undefined;
     const onEvent = enrichInitWithCapabilities(onEventRaw, {
-      thinkingLevelSupported: false,
+      thinkingLevelSupported: true,
+      requestedThinkingLevel: input.thinkingLevel,
+      effectiveThinkingLevel: effort,
     });
     const securityMode = input.securityMode ?? this.defaultSecurityMode;
     const permissionMode = securityMode === "yolo" ? "bypassPermissions" : "default";
@@ -148,6 +158,7 @@ export class ClaudeCliDriver implements RuntimeDriver {
       tools: input.tools,
       additionalDirectories: input.additionalDirectories,
       resumeSessionId: input.resumeSessionId,
+      effort,
     });
 
     const env: NodeJS.ProcessEnv = { ...process.env, ...(input.env ?? {}) };
