@@ -63,3 +63,52 @@ test("parseClaudeSdkMessage maps tool results, result metadata, and stream event
   assert.equal(event?.type, "stream_event");
   assert.equal(event?.type === "stream_event" ? event.summary : undefined, "working");
 });
+
+import { EventEmitter } from "node:events";
+import { attachChildDeathWatchdog } from "../src/drivers/claude-sdk.js";
+
+test("attachChildDeathWatchdog aborts the controller after child exit + grace window (issue #7)", async () => {
+  const child = new EventEmitter();
+  const fakeRequest = { subprocess: child };
+  const controller = new AbortController();
+  let deathInfo: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+
+  const detach = attachChildDeathWatchdog(fakeRequest, 30, controller, (info) => {
+    deathInfo = info;
+  });
+
+  assert.equal(controller.signal.aborted, false);
+  child.emit("close", 137, "SIGKILL");
+  assert.deepEqual(deathInfo, { code: 137, signal: "SIGKILL" });
+  assert.equal(controller.signal.aborted, false, "abort must wait for grace window");
+
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(controller.signal.aborted, true, "abort fires after grace window expires");
+  detach();
+});
+
+test("attachChildDeathWatchdog fires only once across duplicate close+exit events", async () => {
+  const child = new EventEmitter();
+  const controller = new AbortController();
+  let calls = 0;
+
+  attachChildDeathWatchdog({ subprocess: child }, 10, controller, () => {
+    calls += 1;
+  });
+
+  child.emit("close", 0, null);
+  child.emit("exit", 0, null);
+  child.emit("close", 0, null);
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(calls, 1);
+});
+
+test("attachChildDeathWatchdog returns noop when subprocess handle is absent", () => {
+  const controller = new AbortController();
+  const detach = attachChildDeathWatchdog({}, 100, controller, () => {
+    assert.fail("onDeath must not be called when no handle");
+  });
+  // Detach must not throw.
+  detach();
+  assert.equal(controller.signal.aborted, false);
+});

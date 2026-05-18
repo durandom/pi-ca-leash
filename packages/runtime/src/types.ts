@@ -62,6 +62,12 @@ export interface RuntimeStatus {
     message: string;
     code?: string;
   };
+  /**
+   * Resolved coarse security posture captured at `start()` and re-applied to
+   * every subsequent `send()` on the same session unless the caller passes an
+   * explicit override. Persisted so resumes don't silently regress to `safe`.
+   */
+  securityMode?: RuntimeSecurityMode;
   raw?: Record<string, unknown>;
 }
 

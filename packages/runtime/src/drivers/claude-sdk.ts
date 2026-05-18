@@ -23,6 +23,69 @@ function abortError(): DOMException {
   return new DOMException("Aborted", "AbortError");
 }
 
+interface ChildExitInfo {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
+/**
+ * Try to locate the SDK's underlying native child process on the query
+ * object and listen for its death. Returns a detach callback. The SDK does
+ * not promise this shape, so we probe defensively: if the field is missing
+ * or doesn't quack like an EventEmitter, we log once and return a noop —
+ * the run will still complete normally on the cooperative path. Issue #7.
+ */
+/** @internal exported for tests; not part of the public driver surface */
+export function attachChildDeathWatchdog(
+  request: unknown,
+  graceMs: number,
+  controller: AbortController,
+  onDeath: (info: ChildExitInfo) => void | Promise<void>,
+): () => void {
+  const candidates = ["subprocess", "process", "child"] as const;
+  const handle = candidates
+    .map((key) => (request as Record<string, unknown> | null)?.[key])
+    .find((value): value is { once: Function; off?: Function; removeListener?: Function } => {
+      return Boolean(value) && typeof (value as { once?: unknown }).once === "function";
+    });
+
+  if (!handle) {
+    if (!childHandleProbeWarned) {
+      childHandleProbeWarned = true;
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[pi-ca-leash] claude-agent-sdk query has no reachable subprocess handle; " +
+          "external SIGKILL of the native child may wedge sessions (issue #7).",
+      );
+    }
+    return () => {};
+  }
+
+  let fired = false;
+  let timer: NodeJS.Timeout | undefined;
+  const listener = (code: number | null, signal: NodeJS.Signals | null) => {
+    if (fired) return;
+    fired = true;
+    void onDeath({ code, signal });
+    timer = setTimeout(() => {
+      if (!controller.signal.aborted) controller.abort();
+    }, graceMs);
+    if (typeof timer.unref === "function") timer.unref();
+  };
+
+  handle.once("close", listener);
+  handle.once("exit", listener);
+
+  return () => {
+    if (timer) clearTimeout(timer);
+    const off = handle.off ?? handle.removeListener;
+    if (typeof off === "function") {
+      off.call(handle, "close", listener);
+      off.call(handle, "exit", listener);
+    }
+  };
+}
+
 type StreamUserMessage = {
   type: "user";
   message: { role: "user"; content: string };
@@ -231,8 +294,24 @@ export function parseClaudeSdkMessage(message: unknown): NormalizedDriverMessage
   return [];
 }
 
+export interface ClaudeSdkDriverOptions {
+  /**
+   * Grace window (ms) between observing the SDK's native child exit and
+   * aborting the in-process iterator. Lets in-flight messages drain. Issue #7.
+   */
+  childDeathGraceMs?: number;
+}
+
+const DEFAULT_CHILD_DEATH_GRACE_MS = 5_000;
+let childHandleProbeWarned = false;
+
 export class ClaudeSdkDriver implements RuntimeDriver {
   readonly name = "claude-sdk" as const;
+  private readonly childDeathGraceMs: number;
+
+  constructor(options: ClaudeSdkDriverOptions = {}) {
+    this.childDeathGraceMs = options.childDeathGraceMs ?? DEFAULT_CHILD_DEATH_GRACE_MS;
+  }
 
   run(input: RuntimeDriverRunInput, onEventRaw: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
     // Echo the effective thinking budget on the upstream init event so audit
@@ -249,6 +328,8 @@ export class ClaudeSdkDriver implements RuntimeDriver {
       effectiveThinkingLevel: effort,
     });
     const controller = new AbortController();
+    // Hoisted out of the try so the catch block can read it. See issue #7.
+    const childDiedFlag = { value: false };
 
     const done = (async () => {
       try {
@@ -275,6 +356,22 @@ export class ClaudeSdkDriver implements RuntimeDriver {
           options: this.buildOptions(input),
         });
 
+        // Issue #7: when a host externally SIGKILLs the SDK's native child,
+        // the async iterator never settles (no Node-level close event because
+        // we don't own the child handle). If we can reach the SDK's
+        // subprocess, listen for its death and abort the iterator so the run
+        // transitions to `failed` instead of wedging at `state="running"`.
+        const detachChildWatchdog = attachChildDeathWatchdog(request, this.childDeathGraceMs, controller, async (info) => {
+          childDiedFlag.value = true;
+          await onEvent({
+            type: "error",
+            payload: {
+              message: `claude-agent-sdk child exited unexpectedly (code=${info.code ?? "null"} signal=${info.signal ?? "null"})`,
+              code: "CLAUDE_SDK_CHILD_DIED",
+            },
+          });
+        });
+
         const onAbort = () => {
           void request.close?.();
           void request.interrupt?.();
@@ -293,10 +390,14 @@ export class ClaudeSdkDriver implements RuntimeDriver {
           return { code: 0, signal: null };
         } finally {
           controller.signal.removeEventListener("abort", onAbort);
+          detachChildWatchdog();
           await request.close?.();
         }
       } catch (error) {
         if ((error as Error)?.name === "AbortError") {
+          if (childDiedFlag.value) {
+            return { code: 137, signal: "SIGKILL" as const };
+          }
           return { code: 130, signal: "SIGINT" as const };
         }
         const message = enrichClaudeSdkErrorMessage(error instanceof Error ? error.message : String(error), input.model);

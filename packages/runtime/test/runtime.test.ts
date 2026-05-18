@@ -389,6 +389,45 @@ test("send model override survives stale init model on resumed session", async (
   assert.equal(driver.runs[2]?.model, "model-b");
 });
 
+test("securityMode is session-sticky across resumes (issue #8)", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-runtime-test-"));
+  const driver = new FakeDriver();
+  const runtime = new ClaudeCodeRuntime({ storageDir, driver });
+
+  const session = await runtime.start({ prompt: "one", securityMode: "yolo" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  await runtime.send({ sessionId: session.sessionId, message: "two" });
+  await waitForState(runtime, session.sessionId, "idle");
+  await runtime.send({ sessionId: session.sessionId, message: "three" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  assert.equal(driver.runs[0]?.securityMode, "yolo");
+  assert.equal(driver.runs[1]?.securityMode, "yolo", "resume must keep yolo, not regress to safe");
+  assert.equal(driver.runs[2]?.securityMode, "yolo");
+
+  const status = await runtime.status(session.sessionId);
+  assert.equal(status?.securityMode, "yolo");
+});
+
+test("send securityMode override updates persisted value", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-runtime-test-"));
+  const driver = new FakeDriver();
+  const runtime = new ClaudeCodeRuntime({ storageDir, driver });
+
+  const session = await runtime.start({ prompt: "one", securityMode: "safe" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  await runtime.send({ sessionId: session.sessionId, message: "two", securityMode: "yolo" });
+  await waitForState(runtime, session.sessionId, "idle");
+  await runtime.send({ sessionId: session.sessionId, message: "three" });
+  await waitForState(runtime, session.sessionId, "idle");
+
+  assert.equal(driver.runs[0]?.securityMode, "safe");
+  assert.equal(driver.runs[1]?.securityMode, "yolo");
+  assert.equal(driver.runs[2]?.securityMode, "yolo", "override is sticky for subsequent sends");
+});
+
 test("tool events stay normalized with tool names and outputs intact", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-runtime-test-"));
   const runtime = new ClaudeCodeRuntime({ storageDir, driver: new FakeDriver() });

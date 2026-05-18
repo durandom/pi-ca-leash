@@ -103,6 +103,7 @@ export class ClaudeCodeRuntime {
     const driver = this.resolveDriver(driverName);
     const cwd = resolve(input.cwd ?? process.cwd());
     const now = new Date().toISOString();
+    const securityMode = resolveSecurityMode(input);
     const status: RuntimeStatus = {
       sessionId,
       driver: driver.name,
@@ -114,6 +115,7 @@ export class ClaudeCodeRuntime {
       createdAt: now,
       updatedAt: now,
       lastActivityAt: now,
+      securityMode,
       raw: {},
     };
 
@@ -125,7 +127,7 @@ export class ClaudeCodeRuntime {
       appendSystemPrompt: input.appendSystemPrompt,
       model: input.model,
       name: input.name,
-      securityMode: resolveSecurityMode(input),
+      securityMode,
       tools: input.tools,
       additionalDirectories: input.additionalDirectories,
       env: input.env,
@@ -143,12 +145,22 @@ export class ClaudeCodeRuntime {
       throw new Error(`Session ${input.sessionId} already active`);
     }
 
+    // securityMode is session-sticky: an explicit override on this send wins
+    // and becomes the new canonical value (so subsequent resumes carry it);
+    // otherwise we re-apply whatever start() persisted. Without this, every
+    // resume regresses to `safe` and silently re-enables driver sandboxes.
+    const securityMode = input.securityMode
+      ? resolveSecurityMode(input)
+      : status.securityMode ?? "safe";
+    if (input.securityMode && securityMode !== status.securityMode) {
+      await this.patchStatus(input.sessionId, { securityMode });
+    }
     await this.runSession(status, {
       prompt: input.message,
       appendSystemPrompt: input.appendSystemPrompt,
       model: input.model ?? status.model,
       name: status.name,
-      securityMode: resolveSecurityMode(input),
+      securityMode,
       env: input.env,
       resumeSessionId: status.driverSessionId,
       thinkingLevel: input.thinkingLevel,
