@@ -2,6 +2,45 @@
 
 All notable changes to this repository should be recorded here.
 
+## 1.1.0 - 2026-05-18
+
+### Added — Bridge `waitForCompletion` (#14)
+- New `ClaudeRuntimeIntercomBridge.waitForCompletion(sessionId, opts)` and `PiCaLeashManagedPeerApi.waitForCompletion(sessionId, opts)` passthrough. Replaces the consumer-side 1 Hz polling loop in `waitForIdle`-style helpers with an event-driven wait. Subscribes to the runtime event stream and resets the staleness window on every observable driver event (message / tool / result / state change) — a peer that has been busy for an hour producing tool calls is correctly distinguished from one that has been silent for an hour.
+- Termination order: terminal state (`idle`, `interrupted`, `failed`, `stopped`) → resolve; staleness past `staleThresholdMs` → reject `WaitCompletionError` code `WAIT_STALE`; wall-clock past `hardCeilingMs` → reject `WAIT_HARD_CEILING`; `signal.aborted` → reject with `signal.reason` verbatim.
+- `state: "failed"` is a resolution, not a rejection — inspect `status.state` and `status.lastError`. To make failures hard to miss the bridge emits one `console.warn` per failed resolution. Suppress with `silentOnFailure: true` (typical only in tests that *expect* a failure).
+- Driver-aware default staleness threshold via the exported `defaultStaleThresholdMsForDriver(driverName)` helper — `claude-sdk` / `claude-cli`: 2 min; `codex-cli` / `pi-coding-agent`: 5 min. Override per call with `staleThresholdMs`.
+- Listen-then-look ordering: the runtime subscribe is wired *before* the status snapshot, so a peer that lands terminal between the two calls cannot be missed.
+- Public exports: `WaitCompletionError`, `WaitForCompletionOptions`, `WaitCompletionErrorCode`, `defaultStaleThresholdMsForDriver` from `@pi-claude-code-agent/intercom-bridge`.
+
+### Fixed — Bridge bootstrap window (#11)
+- `bridge.send` / `bridge.ask` no longer reject with `PEER_BUSY` against a peer that is still inside its `launchPeer({ waitForIdle: false })` bootstrap run. The previous starting-window wait only handled the `starting` state; drivers that emit `system/init` quickly (the claude-sdk iterator, fake drivers in tests) flip to `busy` while the launch prompt is still running, and the bridge incorrectly treated that as "real" busy. The bridge now tracks per-name bootstrap state (set when `launchPeer` is called with `waitForIdle: false`, cleared on the first observed terminal state) and treats `busy` as a starting-window state while bootstrapping. Once the launch run completes, real follow-up `busy` correctly rejects `PEER_BUSY`. Resolves two long-standing flaky bridge tests on the "send through starting window" path that were 100 % red in CI.
+
+### Fixed — codex driver flag (#13)
+- `codex-cli` driver emits `--sandbox workspace-write` instead of the deprecated `--full-auto` alias for `securityMode: "safe"` (the default). `yolo` mode still uses `--dangerously-bypass-approvals-and-sandbox`. End-to-end semantics are identical (same bwrap `--unshare-net`, same seccomp filter, same `additionalDirectories` plumbing) — the change removes the deprecation warning that was cluttering every safe-mode session's stderr against codex-cli 0.130.0+ and protects against a future codex release dropping the alias.
+
+### Fixed — extension tests
+- `extensions/command-parity.test.ts` and `extensions/llm-tools.test.ts` import `ClaudeCodeRuntime` from `packages/runtime/src/internal.ts` instead of `packages/runtime/src/index.ts`. The class moved to the `/internal` sub-path in 1.0 but these two tests were missed in the refactor — they have been broken since the 1.0 release. `npm test` is fully green again.
+
+### Migration
+
+No breaking changes. Existing consumers can adopt `waitForCompletion` incrementally:
+
+```diff
+- // Old: polling loop in consumer code
+- while ((await managedApi.statusBySessionId(sid))?.state === "busy") {
+-   if (Date.now() - started > hardCeilingMs) throw new Error("timeout");
+-   await sleep(1000);
+- }
++ // New: event-driven, with explicit staleness + hard ceiling
++ const status = await managedApi.waitForCompletion(sid, {
++   staleThresholdMs: 5 * 60_000,
++   hardCeilingMs: 60 * 60_000,
++ });
++ if (status.state === "failed") {
++   // status.lastError carries the captured driver error
++ }
+```
+
 ## 1.0.0 - 2026-05-18
 
 ### Breaking

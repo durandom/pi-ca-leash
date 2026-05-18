@@ -5,7 +5,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { ClaudeCodeRuntime } from "../packages/runtime/src/index.ts";
+import { ClaudeCodeRuntime } from "../packages/runtime/src/internal.ts";
 import { PiCaLeashManagedPeerApi, piCaLeashRuntimeStorageDir } from "../packages/intercom-bridge/src/index.ts";
 import { ADVANCED_COMMANDS_ENV, LEGACY_COMMANDS_ENV } from "./command-visibility.ts";
 
