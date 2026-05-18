@@ -42,20 +42,20 @@ export function buildCodexCliCommand(input: {
   //  - "yolo" → --dangerously-bypass-approvals-and-sandbox (no FS sandbox).
   //    Required for callers that must write outside cwd, e.g. `git commit`
   //    in a linked worktree (parent-repo .git/worktrees/<name>/index.lock
-  //    is EROFS under --full-auto). Caller takes responsibility for isolation.
-  //  - "safe" (default) → --full-auto: workspace-write sandbox, cwd writable.
+  //    is EROFS under --sandbox workspace-write). Caller takes responsibility for isolation.
+  //  - "safe" (default) → --sandbox workspace-write: workspace-write sandbox, cwd writable.
   const args: string[] = ["exec"];
   // reasoning_effort is a TOML config key, surfaced via -c key=value overrides.
   // Must precede subcommand-specific flags so codex parses it as a global.
   const reasoningArgs = input.reasoningEffort
     ? ["-c", `model_reasoning_effort="${input.reasoningEffort}"`]
     : [];
-  const automationFlag =
+  const automationFlag: string[] =
     input.securityMode === "yolo"
-      ? "--dangerously-bypass-approvals-and-sandbox"
-      : "--full-auto";
+      ? ["--dangerously-bypass-approvals-and-sandbox"]
+      : ["--sandbox", "workspace-write"];
   if (input.resumeSessionId) {
-    args.push("resume", ...reasoningArgs, "--json", automationFlag);
+    args.push("resume", ...reasoningArgs, "--json", ...automationFlag);
     if (input.model) {
       args.push("-m", input.model);
     }
@@ -63,7 +63,7 @@ export function buildCodexCliCommand(input: {
     return args;
   }
 
-  args.push(...reasoningArgs, "--json", automationFlag, "-C", input.cwd);
+  args.push(...reasoningArgs, "--json", ...automationFlag, "-C", input.cwd);
   if (input.model) {
     args.push("-m", input.model);
   }

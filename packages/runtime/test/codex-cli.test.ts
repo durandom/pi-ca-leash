@@ -18,17 +18,17 @@ import type { DriverEventEnvelope, ResultEvent } from "../src/types.js";
 // ---------------------------------------------------------------------------
 
 // securityMode mapping:
-//   safe (default) → --full-auto (workspace-write sandbox, cwd writable)
+//   safe (default) → --sandbox workspace-write (workspace-write sandbox, cwd writable)
 //   yolo           → --dangerously-bypass-approvals-and-sandbox
 
-test("buildCodexCliCommand — fresh run defaults to --full-auto (safe)", () => {
+test("buildCodexCliCommand — fresh run defaults to --sandbox workspace-write (safe)", () => {
   const args = buildCodexCliCommand({ prompt: "hello", cwd: "/work" });
-  assert.deepEqual(args, ["exec", "--json", "--full-auto", "-C", "/work", "hello"]);
+  assert.deepEqual(args, ["exec", "--json", "--sandbox", "workspace-write", "-C", "/work", "hello"]);
 });
 
-test("buildCodexCliCommand — securityMode=safe is explicit --full-auto", () => {
+test("buildCodexCliCommand — securityMode=safe is explicit --sandbox workspace-write", () => {
   const args = buildCodexCliCommand({ prompt: "hello", cwd: "/work", securityMode: "safe" });
-  assert.deepEqual(args, ["exec", "--json", "--full-auto", "-C", "/work", "hello"]);
+  assert.deepEqual(args, ["exec", "--json", "--sandbox", "workspace-write", "-C", "/work", "hello"]);
 });
 
 test("buildCodexCliCommand — securityMode=yolo disables sandbox", () => {
@@ -57,8 +57,9 @@ test("buildCodexCliCommand — securityMode is preserved on resume", () => {
     securityMode: "safe",
   });
   assert.ok(yolo.includes("--dangerously-bypass-approvals-and-sandbox"));
-  assert.ok(!yolo.includes("--full-auto"));
-  assert.ok(safe.includes("--full-auto"));
+  assert.ok(!yolo.includes("--sandbox"));
+  assert.ok(safe.includes("--sandbox"));
+  assert.ok(safe.includes("workspace-write"));
   assert.ok(!safe.includes("--dangerously-bypass-approvals-and-sandbox"));
 });
 

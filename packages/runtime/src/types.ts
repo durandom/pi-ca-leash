@@ -96,7 +96,7 @@ export type RuntimeThinkingLevel = "low" | "medium" | "high" | "xhigh" | "max";
  *
  * - `safe` (default): driver runs with its native sandbox + permission prompts
  *   (claude-sdk `permissionMode: "default"`, claude-cli `--permission-mode default`,
- *   codex-cli `--full-auto` workspace-write sandbox).
+ *   codex-cli `--sandbox workspace-write` sandbox).
  * - `yolo`: driver runs without permission prompts and without sandbox where
  *   supported (claude-sdk `bypassPermissions`, claude-cli `--dangerously-skip-permissions`,
  *   codex-cli `--dangerously-bypass-approvals-and-sandbox`).
