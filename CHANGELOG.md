@@ -2,15 +2,57 @@
 
 All notable changes to this repository should be recorded here.
 
-## Unreleased
+## 1.0.0 - 2026-05-18
+
+### Breaking
+- `PiCaLeashManagedPeerApi.runtime` is removed (issue [#9](https://github.com/durandom/pi-ca-leash/issues/9)). Callers that previously reached past the Bridge to use the embedded Runtime directly (`managedApi.runtime.send`, `managedApi.runtime.events`, etc.) must use the Bridge surface — see "Added" below for the new sessionId-keyed Bridge methods. This was the load-bearing escape hatch that made it possible to silently drop driver fields like `securityMode` (cause of #8); closing it forces every gap in the Bridge to surface as a feature request rather than a quiet bypass.
+- `ManagedPeerApiOptions.runtime` removed. Configure the embedded Runtime via the new `runtimeOptions` field (driver, storageDir, defaultDriver, etc.) — the Runtime instance itself stays internal to the API.
+- `BridgeOptions.runtimeOptions` is new and used in the common case where the Bridge owns its Runtime. `BridgeOptions.runtime` is retained for the sibling-sharing case (e.g. the extension shares one Runtime between the Bridge and `ClaudeCodeSubagentBackend` so they see a single in-process event source); if both are passed, `runtime` wins.
+
+### Added — Bridge feature parity (#9)
+- **Pass-through invariant**: `bridge.deliver` / `bridge.send` / `bridge.ask` / `bridge.reply` now forward every driver field from the inbound intercom message verbatim to `runtime.send`. `securityMode`, `thinkingLevel`, `appendSystemPrompt`, `env`, and `model` reach the driver unchanged. Drivers ignore fields they don't recognise. This is the load-bearing fix that prevents future #8-style regressions when new driver fields are added — the Bridge does not need a release. Covered by a dedicated regression test in `packages/intercom-bridge/test/bridge.test.ts`.
+- `IntercomInboundMessage` gains optional `appendSystemPrompt`, `env`, `thinkingLevel`, and `securityMode` fields (the per-message pass-through surface).
+- **`BridgePeer.raw`** projection of `RuntimeStatus.raw` (issue [#9](https://github.com/durandom/pi-ca-leash/issues/9)). Bridge consumers can now read driver init capability fields (`requestedThinkingLevel`, `effectiveThinkingLevel`, `thinkingLevelSupported`, etc.) via `bridge.status(name).raw.init` — the runtime folds system/init driver messages into `status.raw.init` rather than emitting them as transcript events, so this is the only consumer-visible surface. Without this projection callers would have had to drop to `runtime.status(sid).raw.init`, re-creating the bypass pattern #9 closes.
+- **sessionId-keyed Bridge methods**:
+  - `bridge.statusBySessionId(sessionId)` — lookup that mirrors `bridge.status(name)` but takes the runtime sessionId callers already hold from `launchPeer` or events.
+  - `bridge.events(sessionId, cursor?)` — Bridge-routed transcript fetch.
+  - `bridge.subscribe(listener, sessionId?)` — passthrough subscription to the raw `RuntimeEvent` stream, optionally filtered.
+- `PiCaLeashManagedPeerApi` mirrors all three sessionId-keyed methods so consumers don't need to reach into `.bridge`.
+- `ManagedPeerApiOptions.runtimeOptions` lets callers (including tests) inject a custom driver / resolver into the embedded Runtime without taking a handle to the instance.
 
 ### Fixed
 - `claude-sdk` driver no longer wedges at `state="running"` when the SDK's native child is externally `SIGKILL`ed (issue [#7](https://github.com/durandom/pi-ca-leash/issues/7)). The driver now attaches a watchdog to the SDK's underlying subprocess; on `close`/`exit` it aborts the in-process iterator after a 5 s grace window and the run transitions to `failed` (code 137, signal `SIGKILL`). If the SDK ever stops exposing a reachable subprocess handle the driver logs one warning and degrades to the previous behavior. Decision record: `docs/design-issue-7-claude-sdk-wedge.md`.
 - `securityMode` is now session-sticky across resumes (issue [#8](https://github.com/durandom/pi-ca-leash/issues/8)). `start()` persists the resolved mode into `RuntimeStatus`; `send()` re-applies it on every subsequent turn unless the caller passes an explicit `securityMode` override (which then becomes the new persisted canonical value, matching the existing `model`-override semantics). Previously the codex-cli sandbox silently regressed to `safe` on resume, breaking git writes inside sibling-tree worktrees with `EROFS` on `.git/worktrees/<wt>/index.lock`.
+- The Bridge previously forwarded only `{sessionId, message, model}` to `runtime.send` — the upstream cause of #8 and the reason callers had to bypass the Bridge to keep `securityMode` sticky. With the pass-through invariant in place, callers that had to use `managedApi.runtime.send` directly can move back to `bridge.send` / `managedApi.send`.
 
-### Added
+### Added — other
 - `ClaudeSdkDriver` constructor accepts a `childDeathGraceMs` option (default 5000) for tests and hosts that want a tighter / looser death-detection window.
 - `RuntimeStatus.securityMode` is a new persisted field.
+
+### Migration
+
+Consumers (e.g. `spellkave/packages/work-issue-runtime`):
+
+```diff
+- managedApi.runtime.send({ sessionId, message, securityMode, thinkingLevel })
++ managedApi.send(name, { from, text: message, securityMode, thinkingLevel })
+
+- managedApi.runtime.events(sessionId)
++ managedApi.events(sessionId)
+
+- managedApi.runtime.status(sessionId)
++ managedApi.statusBySessionId(sessionId)
+
+- managedApi.runtime.subscribe(listener, sessionId)
++ managedApi.subscribe(listener, sessionId)
+```
+
+Bridge consumers who were injecting a Runtime via `BridgeOptions.runtime` only because the public surface lacked features (rather than for sibling sharing) should switch to `runtimeOptions`:
+
+```diff
+- new ClaudeRuntimeIntercomBridge({ runtime: new ClaudeCodeRuntime({ driver, storageDir }) })
++ new ClaudeRuntimeIntercomBridge({ runtimeOptions: { driver, storageDir } })
+```
 
 ## 0.16.1 - 2026-05-17
 

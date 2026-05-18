@@ -3,6 +3,7 @@ import type {
   InterruptResult,
   RuntimeDriverName,
   RuntimeEvent,
+  RuntimeOptions,
   RuntimeSessionId,
   RuntimeStatus,
   RuntimeSecurityMode,
@@ -36,6 +37,15 @@ export interface BridgePeer {
   lastActivityAt: string;
   kind?: BridgePeerKind;
   metadata?: Record<string, string>;
+  /**
+   * Verbatim projection of `RuntimeStatus.raw` — driver-specific init payload
+   * plus any other runtime-level scratch state. The runtime folds system/init
+   * driver messages into `raw.init` rather than emitting them as transcript
+   * events, so this is the only surface where consumers can read capability
+   * fields like `requestedThinkingLevel` / `effectiveThinkingLevel` /
+   * `thinkingLevelSupported`. Opaque by design — drivers control the shape.
+   */
+  raw?: Record<string, unknown>;
 }
 
 export interface InterruptPeerResult {
@@ -87,6 +97,16 @@ export interface IntercomInboundMessage {
   replyTo?: string;
   timeoutMs?: number;
   model?: string;
+  /**
+   * Driver fields forwarded verbatim to `runtime.send`. The Bridge does not
+   * filter these — drivers ignore fields they don't understand. Set on a
+   * per-message basis; otherwise the runtime re-applies session-sticky values
+   * captured at launch (see `RuntimeStatus.securityMode`).
+   */
+  appendSystemPrompt?: string;
+  env?: Record<string, string>;
+  thinkingLevel?: RuntimeThinkingLevel;
+  securityMode?: RuntimeSecurityMode;
 }
 
 export type DeliveryState = "completed" | "delivered_and_running";
@@ -154,7 +174,24 @@ export interface BridgeTransport {
 }
 
 export interface BridgeOptions {
+  /**
+   * Share an externally-constructed Runtime with the Bridge. Use this when a
+   * sibling consumer (e.g. `ClaudeCodeSubagentBackend`) needs the same
+   * in-process event source and storage owner. The Bridge does NOT expose
+   * this back to its public surface — callers are responsible for not
+   * leaking their own reference.
+   *
+   * If both `runtime` and `runtimeOptions` are set, `runtime` wins and
+   * `runtimeOptions` is ignored.
+   */
   runtime?: ClaudeCodeRuntime;
+  /**
+   * Construction options for a Bridge-owned `ClaudeCodeRuntime`. Use this in
+   * the common case where the Bridge is the sole Runtime consumer (most
+   * applications, all tests with a fake driver). Ignored if `runtime` is
+   * also passed.
+   */
+  runtimeOptions?: RuntimeOptions;
   storageDir?: string;
   transport?: BridgeTransport;
   pollIntervalMs?: number;

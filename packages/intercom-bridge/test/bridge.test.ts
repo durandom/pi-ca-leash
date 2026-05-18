@@ -4,7 +4,6 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, RuntimeDriverRunInput } from "@pi-claude-code-agent/runtime";
-import { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime";
 import {
   ClaudeRuntimeIntercomBridge,
   PiCaLeashManagedPeerApi,
@@ -238,8 +237,9 @@ class FakeTransport implements BridgeTransport {
 test("launch registers peer and ask waits for idle-cycle reply", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
   const driver = new FakeDriver();
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver },
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
 
   const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk", cwd: "/tmp/worker", model: "model-a" });
   assert.equal(peer.name, "worker");
@@ -264,8 +264,9 @@ test("launch registers peer and ask waits for idle-cycle reply", async () => {
 
 test("launch can return before idle when requested", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 20 });
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowDriver() },
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 20 });
 
   const started = Date.now();
   const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", waitForIdle: false });
@@ -279,8 +280,9 @@ test("launch can return before idle when requested", async () => {
 
 test("ask timeout returns delivered_and_running instead of throwing after delivery", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() },
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
 
   await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
   const result = await bridge.ask("worker", { from: "planner", text: "slow follow-up" });
@@ -292,8 +294,9 @@ test("ask timeout returns delivered_and_running instead of throwing after delive
 
 test("send can deliver fire-and-forget without waiting for idle", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() },
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
 
   await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
   const started = Date.now();
@@ -305,9 +308,8 @@ test("send can deliver fire-and-forget without waiting for idle", async () => {
 
 test("send waits through `starting` window instead of throwing", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowDriver() },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 5_000,
@@ -325,9 +327,8 @@ test("send waits through `starting` window instead of throwing", async () => {
 
 test("send to a genuinely busy peer throws PEER_BUSY with code", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 50,
@@ -349,9 +350,8 @@ test("send to a genuinely busy peer throws PEER_BUSY with code", async () => {
 
 test("send during `starting` surfaces PEER_STARTING_TIMEOUT when timeout elapses", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowDriver() },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 5_000,
@@ -370,8 +370,9 @@ test("send during `starting` surfaces PEER_STARTING_TIMEOUT when timeout elapses
 
 test("interrupt signals a busy peer and keeps it registered", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() },
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
 
   await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
   await bridge.send("worker", { from: "planner", text: "slow send" }, { waitForIdle: false });
@@ -384,8 +385,9 @@ test("interrupt signals a busy peer and keeps it registered", async () => {
 
 test("interruptWithResult reports whether the runtime was signalled", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() },
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
 
   await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
 
@@ -406,8 +408,9 @@ test("interruptWithResult reports whether the runtime was signalled", async () =
 
 test("send and reply both route through runtime send", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new FakeDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
 
   await bridge.launchPeer({ name: "worker", prompt: "boot" });
   const afterSend = await bridge.send("worker", { from: "alice", text: "hello" });
@@ -416,14 +419,15 @@ test("send and reply both route through runtime send", async () => {
   const afterReply = await bridge.reply("worker", { from: "alice", text: "ack", replyTo: "msg-1" });
   assert.equal(afterReply.state, "idle");
 
-  const events = await runtime.events(afterReply.sessionId);
+  const events = await bridge.events(afterReply.sessionId);
   assert.equal(events.items.filter((event) => event.type === "result").length, 3);
 });
 
 test("two peers stay isolated while replies ignore thinking and tool traffic", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new FakeDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
 
   const alpha = await bridge.launchPeer({ name: "alpha", prompt: "boot alpha" });
   const beta = await bridge.launchPeer({ name: "beta", prompt: "boot beta" });
@@ -452,10 +456,9 @@ test("two peers stay isolated while replies ignore thinking and tool traffic", a
 
 test("transport registers peer and inbound ask auto-replies", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new FakeDriver() });
-  const transport = new FakeTransport();
+    const transport = new FakeTransport();
   const bridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
     storageDir: join(storageDir, "bridge"),
     transport,
     pollIntervalMs: 5,
@@ -490,10 +493,9 @@ test("transport registers peer and inbound ask auto-replies", async () => {
 
 test("restorePeers reattaches persisted peers", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new FakeDriver() });
-
+  
   const bridge1 = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
     storageDir: join(storageDir, "bridge"),
     transport: new FakeTransport(),
     pollIntervalMs: 5,
@@ -503,7 +505,7 @@ test("restorePeers reattaches persisted peers", async () => {
   assert.equal(peer.state, "idle");
 
   const bridge2 = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
     storageDir: join(storageDir, "bridge"),
     transport: new FakeTransport(),
     pollIntervalMs: 5,
@@ -521,10 +523,9 @@ test("restorePeers reattaches persisted peers", async () => {
 
 test("restorePeers preserves managed metadata", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new FakeDriver() });
-
+  
   const bridge1 = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 2_000,
@@ -537,7 +538,7 @@ test("restorePeers preserves managed metadata", async () => {
   });
 
   const bridge2 = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 2_000,
@@ -550,10 +551,9 @@ test("restorePeers preserves managed metadata", async () => {
 
 test("listPeers reconciles externally created peers without restart", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new FakeDriver() });
-
+  
   const dashboardBridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 2_000,
@@ -561,7 +561,7 @@ test("listPeers reconciles externally created peers without restart", async () =
   assert.equal((await dashboardBridge.listPeers()).length, 0);
 
   const externalBridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 2_000,
@@ -583,10 +583,9 @@ test("listPeers reconciles externally created peers without restart", async () =
 
 test("stop restores externally listed peers before stopping", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new FakeDriver() });
-
+  
   const externalBridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 2_000,
@@ -599,7 +598,7 @@ test("stop restores externally listed peers before stopping", async () => {
   });
 
   const commandBridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 2_000,
@@ -613,10 +612,9 @@ test("stop restores externally listed peers before stopping", async () => {
 
 test("PiCaLeashManagedPeerApi uses shared pi-ca-leash state paths", async () => {
   const cwd = await mkdtemp(join(tmpdir(), "pi-ca-leash-managed-peer-api-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: piCaLeashRuntimeStorageDir(cwd), driver: new FakeDriver() });
   const api = new PiCaLeashManagedPeerApi({
     cwd,
-    runtime,
+    runtimeOptions: { driver: new FakeDriver() },
     pollIntervalMs: 5,
     askTimeoutMs: 2_000,
   });
@@ -630,7 +628,7 @@ test("PiCaLeashManagedPeerApi uses shared pi-ca-leash state paths", async () => 
   assert.equal(peer.sessionId.length > 0, true);
 
   const bridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    runtimeOptions: { storageDir: piCaLeashRuntimeStorageDir(cwd), driver: new FakeDriver() },
     storageDir: piCaLeashBridgeStorageDir(cwd),
     pollIntervalMs: 5,
     askTimeoutMs: 2_000,
@@ -643,9 +641,8 @@ test("PiCaLeashManagedPeerApi uses shared pi-ca-leash state paths", async () => 
 
 test("setTransport late-binds existing peers", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: new FakeDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 2_000,
@@ -760,9 +757,8 @@ test("latest reply extraction returns only the last visible assistant message", 
 test("launchPeer forwards thinkingLevel through to the driver", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
   const driver = new FakeDriver();
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver });
-  const bridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 2_000,
@@ -781,9 +777,8 @@ test("launchPeer forwards thinkingLevel through to the driver", async () => {
 test("launchPeer omits thinkingLevel when caller does not supply one", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
   const driver = new FakeDriver();
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver });
-  const bridge = new ClaudeRuntimeIntercomBridge({
-    runtime,
+    const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver },
     storageDir: join(storageDir, "bridge"),
     pollIntervalMs: 5,
     askTimeoutMs: 2_000,
@@ -792,4 +787,230 @@ test("launchPeer omits thinkingLevel when caller does not supply one", async () 
   await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
 
   assert.equal(driver.runs[0]?.thinkingLevel, undefined);
+});
+
+test("deliver forwards driver passthrough fields verbatim to runtime.send (regression: #8, #9)", async () => {
+  // Pass-through invariant: every driver-recognised field on an outbound
+  // intercom message must reach the driver's `run` call unchanged. Without
+  // this, session-sticky semantics (securityMode, thinkingLevel) silently
+  // regress on every send — see issue #8.
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const driver = new FakeDriver();
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+  await bridge.send("worker", {
+    from: "planner",
+    text: "do thing",
+    securityMode: "yolo",
+    thinkingLevel: "high",
+    appendSystemPrompt: "EXTRA",
+    env: { CASTRA_MARKER: "1" },
+    model: "model-x",
+  });
+
+  // First run is the launch; second is the send we care about.
+  const sendRun = driver.runs[1];
+  assert.ok(sendRun, "expected a second driver run for the send");
+  assert.equal(sendRun.securityMode, "yolo");
+  assert.equal(sendRun.thinkingLevel, "high");
+  assert.equal(sendRun.appendSystemPrompt, "EXTRA");
+  assert.equal(sendRun.env?.CASTRA_MARKER, "1");
+  assert.equal(sendRun.model, "model-x");
+});
+
+test("bridge.statusBySessionId resolves the same peer as status(name)", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+  const byName = await bridge.status("worker");
+  const bySession = await bridge.statusBySessionId(peer.sessionId);
+  assert.deepEqual(byName, bySession);
+
+  assert.equal(await bridge.statusBySessionId("no-such-session"), undefined);
+});
+
+test("bridge.events returns the same chunk shape as runtime.events", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+  const chunk = await bridge.events(peer.sessionId);
+  assert.ok(Array.isArray(chunk.items));
+  assert.equal(typeof chunk.nextCursor, "number");
+  assert.ok(chunk.items.length > 0);
+});
+
+test("bridge.subscribe forwards runtime events including sessionId filter", async () => {
+  // Asserts the new sessionId-keyed Bridge subscribe path actually routes
+  // through to runtime.subscribe — without this, callers that switch from
+  // managedApi.runtime.subscribe to bridge.subscribe would silently lose
+  // their event stream. Regression scope: #9.
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  const allEvents: string[] = [];
+  const unsubAll = bridge.subscribe((event) => {
+    allEvents.push(`${event.sessionId}:${event.type}`);
+  });
+
+  const peerA = await bridge.launchPeer({ name: "alpha", prompt: "boot alpha", driver: "claude-sdk" });
+  const filteredEvents: string[] = [];
+  const unsubFiltered = bridge.subscribe((event) => {
+    filteredEvents.push(`${event.sessionId}:${event.type}`);
+  }, peerA.sessionId);
+
+  await bridge.send("alpha", { from: "test", text: "ping" });
+
+  unsubAll();
+  unsubFiltered();
+
+  assert.ok(allEvents.length > 0, "unfiltered subscribe should see events");
+  assert.ok(filteredEvents.length > 0, "filtered subscribe should see events for its sessionId");
+  assert.ok(
+    filteredEvents.every((line) => line.startsWith(`${peerA.sessionId}:`)),
+    "filtered subscribe should ONLY see events for the bound sessionId",
+  );
+});
+
+test("BridgeOptions.runtime sibling sharing — two Bridges + sibling consumer see one event stream", async () => {
+  // Regression for the in-repo extension pattern: extensions/index.ts
+  // constructs a single ClaudeCodeRuntime and passes it to both the Bridge
+  // and the SubagentBackend. If the Bridge silently constructed its own
+  // Runtime (BridgeOptions.runtime ignored), the SubagentBackend would
+  // never see Bridge-launched peer events and vice versa. This test locks
+  // the sibling-sharing semantics that 1.0 deliberately preserved.
+  const { ClaudeCodeRuntime } = await import("@pi-claude-code-agent/runtime");
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const driver = new FakeDriver();
+  const sharedRuntime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver });
+
+  const bridgeA = new ClaudeRuntimeIntercomBridge({
+    runtime: sharedRuntime,
+    storageDir: join(storageDir, "bridge-a"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+  const bridgeB = new ClaudeRuntimeIntercomBridge({
+    runtime: sharedRuntime,
+    storageDir: join(storageDir, "bridge-b"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  const seenByA: string[] = [];
+  const seenByB: string[] = [];
+  const seenBySibling: string[] = [];
+  bridgeA.subscribe((e) => seenByA.push(e.type));
+  bridgeB.subscribe((e) => seenByB.push(e.type));
+  // Sibling consumer reaches into the same Runtime directly (legitimate —
+  // this is the SubagentBackend / TeamsBackend pattern).
+  sharedRuntime.subscribe((e) => seenBySibling.push(e.type));
+
+  await bridgeA.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+
+  // All three subscribers must have seen the launch's session.created event.
+  // If Bridge had constructed its own Runtime, bridgeB and the sibling
+  // would be empty.
+  assert.ok(seenByA.includes("session.created"), "bridgeA missed session.created");
+  assert.ok(seenByB.includes("session.created"), "bridgeB missed session.created — sibling sharing broken");
+  assert.ok(seenBySibling.includes("session.created"), "sibling Runtime consumer missed session.created");
+});
+
+test("BridgeOptions.runtime wins over runtimeOptions when both are passed", async () => {
+  const { ClaudeCodeRuntime } = await import("@pi-claude-code-agent/runtime");
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const injectedDriver = new FakeDriver();
+  const ignoredDriver = new FakeDriver();
+  const injected = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver: injectedDriver });
+
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtime: injected,
+    runtimeOptions: { driver: ignoredDriver },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+
+  assert.equal(injectedDriver.runs.length, 1, "injected runtime's driver should have been used");
+  assert.equal(ignoredDriver.runs.length, 0, "runtimeOptions.driver should be ignored when runtime is passed");
+});
+
+test("BridgePeer.raw projects RuntimeStatus.raw so consumers can read init capability fields", async () => {
+  // Without `raw` on BridgePeer, callers who need fields the runtime folds
+  // into `status.raw.init` (notably `requestedThinkingLevel`,
+  // `effectiveThinkingLevel`, `thinkingLevelSupported`) would have to drop
+  // to the Runtime — the very escape hatch #9 closed. This test locks the
+  // projection in place.
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
+  assert.ok(peer.raw, "BridgePeer.raw should be populated immediately on launch");
+
+  const synced = await bridge.status("worker");
+  assert.ok(synced?.raw, "bridge.status should project raw");
+  const init = synced?.raw?.init;
+  assert.ok(init && typeof init === "object", `bridge.status(...).raw.init missing — got ${JSON.stringify(synced?.raw)}`);
+  // FakeDriver emits a system/init with `subtype: "init"` and the expected
+  // session/model fields; the runtime folds the payload's `raw` into
+  // `status.raw.init`.
+  assert.equal((init as { subtype?: string }).subtype, "init");
+
+  // statusBySessionId path must project the same shape.
+  const bySession = await bridge.statusBySessionId(peer.sessionId);
+  assert.deepEqual(bySession?.raw, synced?.raw);
+});
+
+test("ManagedPeerApi exposes sessionId-keyed parity methods (#9 acceptance)", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-ca-leash-managed-peer-api-parity-"));
+  const api = new PiCaLeashManagedPeerApi({
+    cwd,
+    runtimeOptions: { driver: new FakeDriver() },
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  const peer = await api.launchPeer({ name: "worker", prompt: "boot" });
+
+  const byName = await api.status("worker");
+  const bySession = await api.statusBySessionId(peer.sessionId);
+  assert.deepEqual(byName, bySession);
+
+  const chunk = await api.events(peer.sessionId);
+  assert.ok(chunk.items.length > 0);
+
+  const seen: string[] = [];
+  const unsubscribe = api.subscribe((e) => seen.push(e.type), peer.sessionId);
+  await api.send("worker", { from: "test", text: "ping" });
+  unsubscribe();
+  assert.ok(seen.length > 0);
 });

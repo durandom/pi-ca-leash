@@ -1,6 +1,6 @@
 {
   "name": "pi-ca-leash",
-  "version": "0.16.1",
+  "version": "1.0.0",
   "description": "Harness-aware Claude Code and Codex CLI extension for pi",
   "license": "MIT",
   "repository": {
@@ -68,6 +68,9 @@
     "smoke:dev:codex": "npm test && npm run build && npm run smoke:pi:auto:codex",
     "smoke:security": "node ./scripts/smoke-security.mjs",
     "smoke:thinking": "node ./scripts/smoke-thinking.mjs",
+    "smoke:bridge-passthrough": "node ./scripts/smoke-bridge-passthrough.mjs",
+    "smoke:bridge-parity": "node ./scripts/smoke-bridge-parity.mjs",
+    "smoke:bridge": "npm run smoke:bridge-passthrough && npm run smoke:bridge-parity",
     "smoke:last": "node ./scripts/smoke-artifacts.mjs latest",
     "smoke:clean": "node ./scripts/smoke-artifacts.mjs clean",
     "demo:intercom": "npm run demo --workspace @pi-claude-code-agent/intercom-bridge",
@@ -90,10 +93,10 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.126",
     "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@pi-claude-code-agent/intercom-bridge": "0.13.0",
-    "@pi-claude-code-agent/runtime": "0.13.0",
-    "@pi-claude-code-agent/subagents-backend": "0.13.0",
-    "@pi-claude-code-agent/teams-backend": "0.13.0"
+    "@pi-claude-code-agent/intercom-bridge": "1.0.0",
+    "@pi-claude-code-agent/runtime": "1.0.0",
+    "@pi-claude-code-agent/subagents-backend": "1.0.0",
+    "@pi-claude-code-agent/teams-backend": "1.0.0"
   },
   "bundledDependencies": [
     "@pi-claude-code-agent/runtime",

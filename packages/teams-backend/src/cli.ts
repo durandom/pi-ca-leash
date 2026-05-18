@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { ClaudeRuntimeIntercomBridge } from "@pi-claude-code-agent/intercom-bridge";
-import { ClaudeCodeRuntime, resolveRuntimeDriverFromEnv } from "@pi-claude-code-agent/runtime";
+import { resolveRuntimeDriverFromEnv } from "@pi-claude-code-agent/runtime";
 import { ClaudeCodeTeamsBackend } from "./backend.js";
 
-const runtime = new ClaudeCodeRuntime({ defaultDriver: resolveRuntimeDriverFromEnv() });
-const bridge = new ClaudeRuntimeIntercomBridge({ runtime });
+const bridge = new ClaudeRuntimeIntercomBridge({
+  runtimeOptions: { defaultDriver: resolveRuntimeDriverFromEnv() },
+});
 const backend = new ClaudeCodeTeamsBackend({ bridge });
 const prompt = process.argv.slice(2).join(" ") || "You are persistent teammate. Reply briefly.";
 

@@ -9,7 +9,7 @@ console.log("[repro] cwd", cwd);
 const api = new PiCaLeashManagedPeerApi({ cwd, askTimeoutMs: 30_000 });
 
 const t0 = Date.now();
-api.runtime.subscribe((e) => {
+api.subscribe((e) => {
   console.log(`[event +${Date.now() - t0}ms]`, JSON.stringify(e).slice(0, 600));
 });
 
@@ -33,13 +33,13 @@ const sid = peer.sessionId;
 const deadline = Date.now() + 30_000;
 let last = null;
 while (Date.now() < deadline) {
-  const s = await api.runtime.status(sid);
+  const s = await api.statusBySessionId(sid);
   if (!s) throw new Error("session gone");
   if (s.state !== last) {
     console.log(`[poll +${Date.now() - t0}ms] state=${s.state}`);
     last = s.state;
   }
-  if (["idle", "interrupted", "failed", "stopped"].includes(s.state)) {
+  if (["idle", "interrupted", "errored", "stopped"].includes(s.state)) {
     console.log(`[repro] DONE state=${s.state} elapsed=${Date.now() - t0}ms`);
     process.exit(s.state === "idle" ? 0 : 2);
   }
