@@ -7,6 +7,8 @@ import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, Runtim
 import {
   ClaudeRuntimeIntercomBridge,
   PiCaLeashManagedPeerApi,
+  WaitCompletionError,
+  defaultStaleThresholdMsForDriver,
   extractLatestReplyText,
   extractReplyText,
   formatInboundMessage,
@@ -17,6 +19,7 @@ import {
   type BridgeTransportOutgoingMessage,
   type BridgeTransportSessionInfo,
 } from "../src/index.js";
+import type { RuntimeDriverName } from "@pi-claude-code-agent/runtime";
 
 class FakeDriver implements RuntimeDriver {
   readonly name = "claude-sdk" as const;
@@ -1015,4 +1018,333 @@ test("ManagedPeerApi exposes sessionId-keyed parity methods (#9 acceptance)", as
   await api.send("worker", { from: "test", text: "ping" });
   unsubscribe();
   assert.ok(seen.length > 0);
+});
+
+// ─── waitForCompletion ─────────────────────────────────────────────────
+// Drivers used below cover the staleness/ceiling/abort surface. Each goes
+// through the real runtime → real bridge → real subscribe path.
+
+class SilentAfterInitDriver implements RuntimeDriver {
+  readonly name: RuntimeDriverName;
+  constructor(name: RuntimeDriverName = "claude-sdk") { this.name = name; }
+  run(input: RuntimeDriverRunInput, onEvent: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+    let stopped = false;
+    const done = (async () => {
+      await onEvent({
+        type: "message",
+        payload: {
+          type: "system", subtype: "init",
+          sessionId: input.resumeSessionId ?? input.sessionId,
+          model: input.model ?? "fake-model",
+          raw: { type: "system", subtype: "init", session_id: input.resumeSessionId ?? input.sessionId, model: input.model ?? "fake-model" },
+        },
+      });
+      // Park until kill() flips `stopped`. Never emits anything else.
+      await new Promise<void>((resolve) => {
+        const id = setInterval(() => { if (stopped) { clearInterval(id); resolve(); } }, 5);
+      });
+      return { code: 130, signal: "SIGINT" } as const;
+    })();
+    return { kill() { stopped = true; }, done };
+  }
+}
+
+class ChattyForeverDriver implements RuntimeDriver {
+  readonly name = "claude-sdk" as const;
+  run(input: RuntimeDriverRunInput, onEvent: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+    let stopped = false;
+    const done = (async () => {
+      await onEvent({
+        type: "message",
+        payload: {
+          type: "system", subtype: "init",
+          sessionId: input.resumeSessionId ?? input.sessionId,
+          model: input.model ?? "fake-model",
+          raw: { type: "system", subtype: "init", session_id: input.resumeSessionId ?? input.sessionId, model: input.model ?? "fake-model" },
+        },
+      });
+      // Emit a steady drip of assistant text events. Never reaches `result`,
+      // so the runtime never flips to `idle` — exactly the case that wall-
+      // clock waiters need a hard ceiling for.
+      for (let i = 0; !stopped; i++) {
+        await new Promise((r) => setTimeout(r, 15));
+        if (stopped) break;
+        await onEvent({
+          type: "message",
+          payload: {
+            type: "assistant",
+            blocks: [{ type: "text", text: `tick:${i}`, raw: { type: "text", text: `tick:${i}` } }],
+            raw: { type: "assistant", message: { content: [{ type: "text", text: `tick:${i}` }] } },
+          },
+        });
+      }
+      return { code: 130, signal: "SIGINT" } as const;
+    })();
+    return { kill() { stopped = true; }, done };
+  }
+}
+
+test("waitForCompletion resolves with terminal status when peer reaches idle", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 5_000,
+  });
+
+  // SlowDriver holds peer in `starting`/`busy` for ~80ms before going idle.
+  const launched = await bridge.launchPeer({ name: "worker", prompt: "boot", waitForIdle: false });
+  assert.ok(["starting", "busy"].includes(launched.state));
+
+  const status = await bridge.waitForCompletion(launched.sessionId, {
+    staleThresholdMs: 5_000,
+    hardCeilingMs: 2_000,
+  });
+  assert.equal(status.state, "idle");
+  assert.equal(status.sessionId, launched.sessionId);
+});
+
+test("waitForCompletion resolves immediately when peer is already terminal", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FakeDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot" });
+  assert.equal(peer.state, "idle");
+
+  const t0 = Date.now();
+  const status = await bridge.waitForCompletion(peer.sessionId, { hardCeilingMs: 1_000 });
+  assert.equal(status.state, "idle");
+  // Snapshot path is sync-ish — must not block on any timer.
+  assert.ok(Date.now() - t0 < 30, `snapshot path should resolve fast, took ${Date.now() - t0}ms`);
+});
+
+test("waitForCompletion rejects with WAIT_STALE when peer goes silent past threshold", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SilentAfterInitDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", waitForIdle: false });
+
+  await assert.rejects(
+    () => bridge.waitForCompletion(peer.sessionId, { staleThresholdMs: 80 }),
+    (err: unknown) => {
+      assert.ok(err instanceof WaitCompletionError);
+      assert.equal(err.code, "WAIT_STALE");
+      assert.equal(err.sessionId, peer.sessionId);
+      assert.ok(err.stalenessMs! >= 60, `stalenessMs ${err.stalenessMs} should be ~>= threshold`);
+      return true;
+    },
+  );
+
+  await bridge.stop("worker");
+});
+
+test("waitForCompletion rejects with WAIT_HARD_CEILING despite continuous activity", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new ChattyForeverDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", waitForIdle: false });
+
+  const t0 = Date.now();
+  await assert.rejects(
+    () => bridge.waitForCompletion(peer.sessionId, {
+      // High enough that activity never trips it. Ceiling must fire instead.
+      staleThresholdMs: 5_000,
+      hardCeilingMs: 120,
+    }),
+    (err: unknown) => {
+      assert.ok(err instanceof WaitCompletionError);
+      assert.equal(err.code, "WAIT_HARD_CEILING");
+      assert.ok(err.elapsedMs >= 100, `elapsedMs ${err.elapsedMs} should reflect ceiling`);
+      return true;
+    },
+  );
+  // Sanity: real wall clock matches ceiling, not later.
+  assert.ok(Date.now() - t0 < 500, "ceiling fired promptly");
+
+  await bridge.stop("worker");
+});
+
+test("waitForCompletion rejects with the AbortSignal's reason", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SilentAfterInitDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", waitForIdle: false });
+
+  // (a) Live abort.
+  const live = new AbortController();
+  const reason = new Error("caller-cancelled");
+  const wait = bridge.waitForCompletion(peer.sessionId, { staleThresholdMs: 5_000, signal: live.signal });
+  setTimeout(() => live.abort(reason), 30);
+  await assert.rejects(wait, (err: unknown) => {
+    assert.equal(err, reason);
+    return true;
+  });
+
+  // (b) Pre-aborted.
+  const pre = new AbortController();
+  const preReason = new Error("pre-cancelled");
+  pre.abort(preReason);
+  await assert.rejects(
+    bridge.waitForCompletion(peer.sessionId, { signal: pre.signal }),
+    (err: unknown) => { assert.equal(err, preReason); return true; },
+  );
+
+  await bridge.stop("worker");
+});
+
+test("waitForCompletion uses driver-aware default when staleThresholdMs is omitted", async () => {
+  // Unit-level sanity on the exported helper — locks the documented contract.
+  assert.equal(defaultStaleThresholdMsForDriver("claude-sdk"), 2 * 60_000);
+  assert.equal(defaultStaleThresholdMsForDriver("claude-cli"), 2 * 60_000);
+  assert.equal(defaultStaleThresholdMsForDriver("codex-cli"), 5 * 60_000);
+  assert.equal(defaultStaleThresholdMsForDriver("pi-coding-agent"), 5 * 60_000);
+});
+
+test("waitForCompletion normalizes across drivers — same call shape, codex-cli driver name", async () => {
+  // Driver advertising a different name still flows through the same surface.
+  // No driver-specific branches at the call site.
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SilentAfterInitDriver("codex-cli") },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "codex-cli", waitForIdle: false });
+  const status = await bridge.statusBySessionId(peer.sessionId);
+  assert.equal(status?.driver, "codex-cli");
+
+  await assert.rejects(
+    () => bridge.waitForCompletion(peer.sessionId, { staleThresholdMs: 60 }),
+    (err: unknown) => err instanceof WaitCompletionError && err.code === "WAIT_STALE",
+  );
+  await bridge.stop("worker");
+});
+
+test("PiCaLeashManagedPeerApi.waitForCompletion delegates to the bridge", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-managed-wait-"));
+  const api = new PiCaLeashManagedPeerApi({
+    cwd,
+    runtimeOptions: { driver: new FakeDriver() },
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  const peer = await api.launchPeer({ name: "worker", prompt: "boot" });
+  const status = await api.waitForCompletion(peer.sessionId);
+  assert.equal(status.state, "idle");
+});
+
+class FailingDriver implements RuntimeDriver {
+  readonly name = "claude-sdk" as const;
+  run(input: RuntimeDriverRunInput, onEvent: (event: DriverEventEnvelope) => Promise<void> | void): RuntimeDriverRunHandle {
+    const done = (async () => {
+      await onEvent({
+        type: "message",
+        payload: {
+          type: "system", subtype: "init",
+          sessionId: input.resumeSessionId ?? input.sessionId,
+          model: input.model ?? "fake-model",
+          raw: { type: "system", subtype: "init", session_id: input.resumeSessionId ?? input.sessionId, model: input.model ?? "fake-model" },
+        },
+      });
+      await onEvent({ type: "error", payload: { message: "kaboom in driver", code: "BOOM" } });
+      // Non-zero exit code → runtime flips state to "failed".
+      return { code: 1, signal: null } as const;
+    })();
+    return { kill() { /* no-op */ }, done };
+  }
+}
+
+test("waitForCompletion warns loudly on state=failed by default", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FailingDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", waitForIdle: false });
+
+  const warnings: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args.map((a) => String(a)).join(" ")); };
+  try {
+    const status = await bridge.waitForCompletion(peer.sessionId, { hardCeilingMs: 1_000 });
+    assert.equal(status.state, "failed");
+    assert.equal(status.lastError?.message, "kaboom in driver");
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(warnings.length, 1, `expected exactly one warning, got ${warnings.length}`);
+  assert.match(warnings[0], /state=failed/);
+  assert.match(warnings[0], /kaboom in driver/);
+
+  await bridge.stop("worker");
+});
+
+test("waitForCompletion stays silent on state=failed when silentOnFailure is set", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new FailingDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", waitForIdle: false });
+
+  const warnings: string[] = [];
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => { warnings.push(args.map((a) => String(a)).join(" ")); };
+  try {
+    const status = await bridge.waitForCompletion(peer.sessionId, { silentOnFailure: true });
+    assert.equal(status.state, "failed");
+  } finally {
+    console.warn = origWarn;
+  }
+  assert.equal(warnings.length, 0);
+
+  await bridge.stop("worker");
+});
+
+test("waitForCompletion event refresh prevents stale rejection on a long-but-progressing peer", async () => {
+  // Activity must reset the staleness window. ChattyForeverDriver emits every
+  // ~15ms, so a 60ms threshold with a high ceiling should NOT fire stale.
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new ChattyForeverDriver() },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+  const peer = await bridge.launchPeer({ name: "worker", prompt: "boot", waitForIdle: false });
+
+  // Use ceiling as the terminating condition — proves stale never fired
+  // despite many threshold-windows worth of wall clock elapsing.
+  await assert.rejects(
+    () => bridge.waitForCompletion(peer.sessionId, { staleThresholdMs: 60, hardCeilingMs: 200 }),
+    (err: unknown) => {
+      assert.ok(err instanceof WaitCompletionError);
+      assert.equal(err.code, "WAIT_HARD_CEILING");
+      return true;
+    },
+  );
+  await bridge.stop("worker");
 });

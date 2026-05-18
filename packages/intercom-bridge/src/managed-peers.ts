@@ -14,7 +14,9 @@ import type {
   BridgePeer,
   InterruptPeerResult,
   LaunchPeerInput,
+  WaitForCompletionOptions,
 } from "./types.js";
+import type { RuntimeStatus } from "@pi-claude-code-agent/runtime";
 
 export const PI_CA_LEASH_STATE_DIR_NAME = ".pi-ca-leash";
 
@@ -96,6 +98,15 @@ export class PiCaLeashManagedPeerApi {
 
   subscribe(listener: (event: RuntimeEvent) => void, sessionId?: RuntimeSessionId): () => void {
     return this.bridge.subscribe(listener, sessionId);
+  }
+
+  /**
+   * Event-driven wait for a session to reach a terminal state, with
+   * staleness + hard-ceiling backstops. Driver-aware defaults are picked
+   * from the session's runtime driver. See `ClaudeRuntimeIntercomBridge.waitForCompletion`.
+   */
+  async waitForCompletion(sessionId: RuntimeSessionId, opts?: WaitForCompletionOptions): Promise<RuntimeStatus> {
+    return this.bridge.waitForCompletion(sessionId, opts);
   }
 
   async reconcilePeers(): Promise<BridgePeer[]> {

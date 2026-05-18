@@ -1,8 +1,10 @@
 import { resolve } from "node:path";
 import {
+  type RuntimeDriverName,
   type RuntimeEvent,
   type RuntimeMessageBlock,
   type RuntimeSessionId,
+  type RuntimeSessionState,
   type RuntimeStatus,
   type TranscriptChunk,
 } from "@pi-claude-code-agent/runtime";
@@ -25,10 +27,40 @@ import type {
   IntercomInboundMessage,
   InterruptPeerResult,
   LaunchPeerInput,
+  WaitForCompletionOptions,
 } from "./types.js";
+import { WaitCompletionError } from "./types.js";
 
 const DEFAULT_ASK_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_INTERVAL_MS = 100;
+
+const TERMINAL_RUNTIME_STATES: ReadonlySet<RuntimeSessionState> = new Set([
+  "idle",
+  "interrupted",
+  "failed",
+  "stopped",
+]);
+
+/**
+ * Driver-aware default for `WaitForCompletionOptions.staleThresholdMs`.
+ *
+ * Different drivers emit driver events at very different rates. Claude
+ * (sdk/cli) streams thinking blocks and tool deltas continuously, so a
+ * 2-minute gap is already strongly indicative of a wedged peer. Codex and
+ * `pi-coding-agent` batch much more aggressively — a 5-minute gap is closer
+ * to the "alive but quiet" floor. The numbers are deliberately coarse;
+ * callers wanting tighter bounds should pass `staleThresholdMs` explicitly.
+ */
+export function defaultStaleThresholdMsForDriver(driver: RuntimeDriverName): number {
+  switch (driver) {
+    case "claude-sdk":
+    case "claude-cli":
+      return 2 * 60_000;
+    case "codex-cli":
+    case "pi-coding-agent":
+      return 5 * 60_000;
+  }
+}
 
 const BRIDGE_SYSTEM_PROMPT = [
   "You are a long-lived Claude worker reached through intercom-style messages.",
@@ -44,6 +76,15 @@ export class ClaudeRuntimeIntercomBridge {
   private readonly pollIntervalMs: number;
   private readonly askTimeoutMs: number;
   private readonly peers = new Map<string, BridgePeer>();
+  /**
+   * Names of peers that were launched with `waitForIdle: false` and have not
+   * yet been observed in a terminal state. While in this set, a concurrent
+   * `send`/`ask` must wait through the launch run's `busy` window rather
+   * than reject with `PEER_BUSY` — the only work the peer is doing is its
+   * own bootstrap. Cleared as soon as `deliver` (or any sync path) sees
+   * idle/interrupted/failed/stopped, or on stop/disconnect.
+   */
+  private readonly bootstrappingPeers = new Set<string>();
 
   constructor(options: BridgeOptions = {}) {
     this.runtime = options.runtime ?? new ClaudeCodeRuntime(options.runtimeOptions);
@@ -78,6 +119,10 @@ export class ClaudeRuntimeIntercomBridge {
     await this.registerTransportPeer(peer.name);
     if (input.waitForIdle !== false) {
       await this.waitForTerminalState(peer.sessionId);
+    } else {
+      // Fire-and-forget launch: subsequent `send`/`ask` must treat the launch
+      // run's `busy` state as part of the starting window, not as PEER_BUSY.
+      this.bootstrappingPeers.add(input.name);
     }
     return this.syncPeerFromRuntime(peer.name);
   }
@@ -151,6 +196,148 @@ export class ClaudeRuntimeIntercomBridge {
    */
   subscribe(listener: (event: RuntimeEvent) => void, sessionId?: RuntimeSessionId): () => void {
     return this.runtime.subscribe(listener, sessionId);
+  }
+
+  /**
+   * Wait until `sessionId` reaches a terminal state (`idle`, `interrupted`,
+   * `failed`, `stopped`), or reject if the peer goes silent past
+   * `staleThresholdMs`, exceeds `hardCeilingMs`, or the caller aborts.
+   *
+   * Event-driven: subscribes to the runtime's event stream and resets the
+   * staleness window on every event for this session. The pattern is
+   * listen-then-look — we subscribe BEFORE snapshotting status, so a peer
+   * that lands terminal between snapshot and subscribe cannot be missed.
+   *
+   * Resolves with the terminal `RuntimeStatus`. `failed` is a resolution,
+   * not a rejection: inspect `.state` and `.lastError` to distinguish.
+   */
+  async waitForCompletion(
+    sessionId: RuntimeSessionId,
+    opts: WaitForCompletionOptions = {},
+  ): Promise<RuntimeStatus> {
+    const started = Date.now();
+    return new Promise<RuntimeStatus>((resolveP, rejectP) => {
+      let settled = false;
+      let unsubscribe: (() => void) | null = null;
+      let staleTimer: NodeJS.Timeout | null = null;
+      let ceilingTimer: NodeJS.Timeout | null = null;
+      let abortHandler: (() => void) | null = null;
+      let staleThresholdMs: number | undefined;
+      let lastActivityIso: string | undefined;
+      let lastActivityMs = started;
+
+      const cleanup = () => {
+        if (staleTimer) { clearTimeout(staleTimer); staleTimer = null; }
+        if (ceilingTimer) { clearTimeout(ceilingTimer); ceilingTimer = null; }
+        if (abortHandler && opts.signal) {
+          opts.signal.removeEventListener("abort", abortHandler);
+          abortHandler = null;
+        }
+        if (unsubscribe) { unsubscribe(); unsubscribe = null; }
+      };
+      const resolve = (status: RuntimeStatus) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if (status.state === "failed" && !opts.silentOnFailure) {
+          // `failed` is a resolution, not a rejection — but we make it loud
+          // so callers don't silently drop a failure on the floor. Suppress
+          // with `silentOnFailure: true` (tests, expected-failure flows).
+          const detail = status.lastError?.message ?? "(no lastError captured)";
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[bridge.waitForCompletion] peer ${status.sessionId} resolved with state=failed: ${detail}`,
+          );
+        }
+        resolveP(status);
+      };
+      const reject = (err: unknown) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        rejectP(err);
+      };
+
+      const armStaleTimer = () => {
+        if (staleThresholdMs === undefined || !Number.isFinite(staleThresholdMs)) return;
+        if (staleTimer) clearTimeout(staleTimer);
+        const remaining = Math.max(0, staleThresholdMs - (Date.now() - lastActivityMs));
+        staleTimer = setTimeout(() => {
+          const stalenessMs = Date.now() - lastActivityMs;
+          reject(new WaitCompletionError({
+            code: "WAIT_STALE",
+            message: `Peer ${sessionId} silent for ${stalenessMs}ms (threshold ${staleThresholdMs}ms)`,
+            sessionId,
+            elapsedMs: Date.now() - started,
+            stalenessMs,
+            lastActivityAt: lastActivityIso,
+          }));
+        }, remaining);
+      };
+
+      const onEvent = (event: RuntimeEvent) => {
+        if (settled) return;
+        if (event.sessionId !== sessionId) return;
+        lastActivityMs = Date.now();
+        lastActivityIso = event.timestamp ?? new Date(lastActivityMs).toISOString();
+        armStaleTimer();
+        if (event.type === "session.idle" || event.type === "session.stopped") {
+          this.runtime.status(sessionId).then((status) => {
+            if (!status) {
+              reject(new Error(`Unknown runtime session ${sessionId}`));
+              return;
+            }
+            resolve(status);
+          }).catch(reject);
+        }
+      };
+
+      // 1. Listen first — anything emitted between here and the snapshot
+      //    below will hit `onEvent` and cannot be lost.
+      unsubscribe = this.runtime.subscribe(onEvent, sessionId);
+
+      // 2. Hard ceiling + abort signal.
+      if (opts.hardCeilingMs !== undefined && Number.isFinite(opts.hardCeilingMs)) {
+        ceilingTimer = setTimeout(() => {
+          reject(new WaitCompletionError({
+            code: "WAIT_HARD_CEILING",
+            message: `Peer ${sessionId} did not complete within hard ceiling ${opts.hardCeilingMs}ms`,
+            sessionId,
+            elapsedMs: Date.now() - started,
+            lastActivityAt: lastActivityIso,
+          }));
+        }, opts.hardCeilingMs);
+      }
+      if (opts.signal) {
+        if (opts.signal.aborted) {
+          queueMicrotask(() => reject(opts.signal!.reason ?? new DOMException("Aborted", "AbortError")));
+          return;
+        }
+        abortHandler = () => reject(opts.signal!.reason ?? new DOMException("Aborted", "AbortError"));
+        opts.signal.addEventListener("abort", abortHandler, { once: true });
+      }
+
+      // 3. Snapshot. Returns immediately for already-terminal peers; otherwise
+      //    arms the staleness timer using the driver-aware default.
+      this.runtime.status(sessionId).then((status) => {
+        if (settled) return;
+        if (!status) {
+          reject(new Error(`Unknown runtime session ${sessionId}`));
+          return;
+        }
+        if (TERMINAL_RUNTIME_STATES.has(status.state)) {
+          resolve(status);
+          return;
+        }
+        staleThresholdMs = opts.staleThresholdMs ?? defaultStaleThresholdMsForDriver(status.driver);
+        const parsed = Date.parse(status.lastActivityAt);
+        if (Number.isFinite(parsed)) {
+          lastActivityMs = parsed;
+          lastActivityIso = status.lastActivityAt;
+        }
+        armStaleTimer();
+      }).catch(reject);
+    });
   }
 
   async reconcilePeers(): Promise<BridgePeer[]> {
@@ -277,11 +464,18 @@ export class ClaudeRuntimeIntercomBridge {
 
   private async deliver(name: string, inbound: IntercomInboundMessage, options: { waitForIdle: boolean }): Promise<AskResult> {
     let peer = await this.syncPeerFromRuntime(name);
-    if (peer.state === "starting" || peer.state === "connected") {
-      // Slow-spawn drivers (notably claude-cli) leave the peer in `starting`
-      // while the first prompt runs. Wait for the bootstrap window to close
-      // before deciding deliverability — racing it would surface as a
-      // misleading "busy" error even though the peer never had a chance to run.
+    // If the peer has ever reached a terminal state, its launch run is done —
+    // any future `busy` is real work, not bootstrap.
+    if (["idle", "interrupted", "failed", "stopped"].includes(peer.state)) {
+      this.bootstrappingPeers.delete(name);
+    }
+    const inBootstrap = this.bootstrappingPeers.has(name);
+    // Slow-spawn drivers leave the peer in `starting` while the first prompt
+    // runs (claude-cli). Fast-init drivers flip to `busy` after `init` even
+    // though the launch prompt is still running (claude-sdk via fake/slow
+    // driver). Both cases are bootstrap and must wait through, not throw
+    // PEER_BUSY — the peer never had a chance to accept a follow-up.
+    if (peer.state === "starting" || peer.state === "connected" || (inBootstrap && peer.state === "busy")) {
       const waited = await this.waitForTerminalStateOrCurrent(
         peer.sessionId,
         inbound.timeoutMs ?? this.askTimeoutMs,
@@ -292,6 +486,7 @@ export class ClaudeRuntimeIntercomBridge {
           { code: "PEER_STARTING_TIMEOUT" },
         );
       }
+      this.bootstrappingPeers.delete(name);
       peer = await this.syncPeerFromRuntime(name);
     }
     if (peer.state === "busy") {
@@ -471,6 +666,7 @@ export class ClaudeRuntimeIntercomBridge {
   }
 
   private async forgetPeer(name: string): Promise<void> {
+    this.bootstrappingPeers.delete(name);
     const registry = await readBridgeRegistry(this.storageDir);
     await writeBridgeRegistry(this.storageDir, {
       peers: registry.peers.filter((peer) => peer.name !== name),

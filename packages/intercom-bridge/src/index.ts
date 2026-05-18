@@ -9,12 +9,14 @@ export {
 export { PiIntercomTransport } from "./pi-intercom-transport.js";
 export {
   BRIDGE_SYSTEM_PROMPT,
+  defaultStaleThresholdMsForDriver,
   extractLatestReplyText,
   extractReplyText,
   formatInboundMessage,
   formatTransportInboundText,
   mapRuntimeState,
 } from "./bridge.js";
+export { WaitCompletionError } from "./types.js";
 export {
   defaultBridgeStorageDir,
   bridgeRegistryPath,
@@ -39,5 +41,7 @@ export type {
   IntercomMessageKind,
   InterruptPeerResult,
   LaunchPeerInput,
+  WaitCompletionErrorCode,
+  WaitForCompletionOptions,
 } from "./types.js";
 export type { ManagedPeerApiOptions } from "./managed-peers.js";

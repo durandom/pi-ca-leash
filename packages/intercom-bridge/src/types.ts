@@ -122,6 +122,58 @@ export interface AskResult {
   deliveryState: DeliveryState;
 }
 
+export interface WaitForCompletionOptions {
+  /**
+   * Reject if no driver event arrives within this many ms. Every observable
+   * driver event (message, tool, result, state change) refreshes the
+   * staleness window. Omit to use the driver-aware default from
+   * `defaultStaleThresholdMsForDriver`. Pass `Infinity` to disable.
+   */
+  staleThresholdMs?: number;
+  /**
+   * Wall-clock backstop. Reject if total elapsed time since the call
+   * started exceeds this, regardless of activity. Catches peers that keep
+   * emitting events but never reach a terminal state. Omit for no ceiling.
+   */
+  hardCeilingMs?: number;
+  signal?: AbortSignal;
+  /**
+   * `waitForCompletion` resolves (does not reject) when a peer ends in
+   * `state: "failed"` — inspect `status.state` and `status.lastError` on
+   * the result. To make those failures hard to miss the bridge emits a
+   * single `console.warn` on each failed resolution, carrying the peer
+   * sessionId and the captured error message. Set this to `true` to
+   * suppress the warning (typical only in tests that *expect* failures).
+   */
+  silentOnFailure?: boolean;
+}
+
+export type WaitCompletionErrorCode = "WAIT_STALE" | "WAIT_HARD_CEILING";
+
+export class WaitCompletionError extends Error {
+  readonly code: WaitCompletionErrorCode;
+  readonly sessionId: RuntimeSessionId;
+  readonly elapsedMs: number;
+  readonly stalenessMs?: number;
+  readonly lastActivityAt?: string;
+  constructor(init: {
+    code: WaitCompletionErrorCode;
+    message: string;
+    sessionId: RuntimeSessionId;
+    elapsedMs: number;
+    stalenessMs?: number;
+    lastActivityAt?: string;
+  }) {
+    super(init.message);
+    this.name = "WaitCompletionError";
+    this.code = init.code;
+    this.sessionId = init.sessionId;
+    this.elapsedMs = init.elapsedMs;
+    this.stalenessMs = init.stalenessMs;
+    this.lastActivityAt = init.lastActivityAt;
+  }
+}
+
 export interface BridgeTransportAttachment {
   type: "file" | "snippet" | "context";
   name: string;
