@@ -1,6 +1,6 @@
 // Minimal reproducer for E2E.8: claude-cli driver hangs in `starting`.
 // Skips bridge — exercises ClaudeCodeRuntime directly.
-import { ClaudeCodeRuntime } from "../packages/runtime/dist/index.js";
+import { ClaudeCodeRuntime } from "../packages/runtime/dist/internal.js";
 import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";

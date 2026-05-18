@@ -901,7 +901,7 @@ test("BridgeOptions.runtime sibling sharing — two Bridges + sibling consumer s
   // Runtime (BridgeOptions.runtime ignored), the SubagentBackend would
   // never see Bridge-launched peer events and vice versa. This test locks
   // the sibling-sharing semantics that 1.0 deliberately preserved.
-  const { ClaudeCodeRuntime } = await import("@pi-claude-code-agent/runtime");
+  const { ClaudeCodeRuntime } = await import("@pi-claude-code-agent/runtime/internal");
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
   const driver = new FakeDriver();
   const sharedRuntime = new ClaudeCodeRuntime({ storageDir: join(storageDir, "runtime"), driver });
@@ -939,7 +939,7 @@ test("BridgeOptions.runtime sibling sharing — two Bridges + sibling consumer s
 });
 
 test("BridgeOptions.runtime wins over runtimeOptions when both are passed", async () => {
-  const { ClaudeCodeRuntime } = await import("@pi-claude-code-agent/runtime");
+  const { ClaudeCodeRuntime } = await import("@pi-claude-code-agent/runtime/internal");
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
   const injectedDriver = new FakeDriver();
   const ignoredDriver = new FakeDriver();

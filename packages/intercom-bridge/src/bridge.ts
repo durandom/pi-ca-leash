@@ -1,12 +1,12 @@
 import { resolve } from "node:path";
 import {
-  ClaudeCodeRuntime,
   type RuntimeEvent,
   type RuntimeMessageBlock,
   type RuntimeSessionId,
   type RuntimeStatus,
   type TranscriptChunk,
 } from "@pi-claude-code-agent/runtime";
+import { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime/internal";
 import {
   defaultBridgeStorageDir,
   readBridgeRegistry,

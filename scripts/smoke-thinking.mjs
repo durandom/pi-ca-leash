@@ -31,7 +31,9 @@ const has = (bin) =>
   spawnSync("which", [bin], { stdio: ["ignore", "pipe", "ignore"] }).status === 0;
 
 async function importRuntime() {
-  return await import(join(repoRoot, "packages/runtime/dist/index.js"));
+  // Harness smoke reaches into the runtime supervisor directly — that is
+  // why it uses the `/internal` entry point, not the public `index.js`.
+  return await import(join(repoRoot, "packages/runtime/dist/internal.js"));
 }
 
 // Prompt that reliably engages Anthropic's thinking budget at effort=max

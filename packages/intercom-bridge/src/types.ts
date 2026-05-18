@@ -1,5 +1,4 @@
 import type {
-  ClaudeCodeRuntime,
   InterruptResult,
   RuntimeDriverName,
   RuntimeEvent,
@@ -10,6 +9,7 @@ import type {
   RuntimeThinkingLevel,
   StartSessionInput,
 } from "@pi-claude-code-agent/runtime";
+import type { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime/internal";
 
 export type BridgeState =
   | "starting"

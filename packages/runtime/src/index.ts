@@ -1,4 +1,8 @@
-export { ClaudeCodeRuntime } from "./runtime.js";
+// `ClaudeCodeRuntime` is intentionally NOT exported from the public entry.
+// It is the supervisor layer beneath the Bridge; the public surface is
+// `@pi-claude-code-agent/intercom-bridge`. Sibling supervisors that
+// legitimately need the class can import it from
+// `@pi-claude-code-agent/runtime/internal`.
 export { RUNTIME_DRIVER_ENV, parseRuntimeDriverName, resolveRuntimeDriverFromEnv } from "./driver-config.js";
 export { PI_CA_LEASH_CONFIG_ENV, defaultConfigPaths, loadPiCaLeashConfigSync, repositoryConfigPath, xdgConfigPath } from "./config.js";
 export { resolveSecurityMode } from "./security-mode.js";

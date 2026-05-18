@@ -7,6 +7,7 @@ All notable changes to this repository should be recorded here.
 ### Breaking
 - `PiCaLeashManagedPeerApi.runtime` is removed (issue [#9](https://github.com/durandom/pi-ca-leash/issues/9)). Callers that previously reached past the Bridge to use the embedded Runtime directly (`managedApi.runtime.send`, `managedApi.runtime.events`, etc.) must use the Bridge surface — see "Added" below for the new sessionId-keyed Bridge methods. This was the load-bearing escape hatch that made it possible to silently drop driver fields like `securityMode` (cause of #8); closing it forces every gap in the Bridge to surface as a feature request rather than a quiet bypass.
 - `ManagedPeerApiOptions.runtime` removed. Configure the embedded Runtime via the new `runtimeOptions` field (driver, storageDir, defaultDriver, etc.) — the Runtime instance itself stays internal to the API.
+- **`ClaudeCodeRuntime` is no longer exported from `@pi-claude-code-agent/runtime`.** It moved to the `@pi-claude-code-agent/runtime/internal` sub-path. Importing the class from the top-level entry point now fails — a deliberate, visible signal that you are reaching past the public Bridge surface. Sibling supervisors (`intercom-bridge`, `subagents-backend`, `teams-backend`, harness smokes) import from `/internal`. Application consumers should use `@pi-claude-code-agent/intercom-bridge` instead.
 - `BridgeOptions.runtimeOptions` is new and used in the common case where the Bridge owns its Runtime. `BridgeOptions.runtime` is retained for the sibling-sharing case (e.g. the extension shares one Runtime between the Bridge and `ClaudeCodeSubagentBackend` so they see a single in-process event source); if both are passed, `runtime` wins.
 
 ### Added — Bridge feature parity (#9)
@@ -52,6 +53,13 @@ Bridge consumers who were injecting a Runtime via `BridgeOptions.runtime` only b
 ```diff
 - new ClaudeRuntimeIntercomBridge({ runtime: new ClaudeCodeRuntime({ driver, storageDir }) })
 + new ClaudeRuntimeIntercomBridge({ runtimeOptions: { driver, storageDir } })
+```
+
+Sibling supervisors that legitimately need the `ClaudeCodeRuntime` class (e.g. you are building a parallel backend on top of the runtime, not a Bridge consumer) must import from the `/internal` sub-path:
+
+```diff
+- import { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime";
++ import { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime/internal";
 ```
 
 ## 0.16.1 - 2026-05-17
