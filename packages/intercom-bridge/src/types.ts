@@ -99,9 +99,12 @@ export interface IntercomInboundMessage {
   model?: string;
   /**
    * Driver fields forwarded verbatim to `runtime.send`. The Bridge does not
-   * filter these — drivers ignore fields they don't understand. Set on a
-   * per-message basis; otherwise the runtime re-applies session-sticky values
-   * captured at launch (see `RuntimeStatus.securityMode`).
+   * filter these — drivers ignore fields they don't understand. Of these
+   * four, only `securityMode` is session-sticky at the runtime layer (see
+   * `RuntimeStatus.securityMode`): omitting it on a follow-up re-applies
+   * the value captured at `start()`. `appendSystemPrompt`, `env`, and
+   * `thinkingLevel` are per-send only — omit on a follow-up and the
+   * driver falls back to its own defaults (no implicit re-application).
    */
   appendSystemPrompt?: string;
   env?: Record<string, string>;

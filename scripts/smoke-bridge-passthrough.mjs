@@ -7,19 +7,22 @@
  *
  * For each available driver:
  *   1. Launch a peer via Bridge with `securityMode: "yolo"` and
- *      `thinkingLevel: "high"` set on the launch (sticky).
- *   2. Send a follow-up via Bridge WITHOUT re-passing those fields. Sticky
- *      values must survive (regression coverage for #8).
- *   3. Assert:
- *        - init event surfaces `requestedThinkingLevel: "high"` and
- *          `effectiveThinkingLevel` after the driver-specific fold;
- *        - at least one result event reports `usage.reasoningOutputTokens > 0`
- *          OR contains a thinking content block (Anthropic decides per
- *          prompt whether to surface thinking blocks);
- *        - the session's persisted `securityMode` is still "yolo" after the
- *          second turn.
- *   4. Send a third turn that EXPLICITLY overrides `securityMode: "safe"`
- *      and asserts the override took effect (canonical updated).
+ *      `thinkingLevel` set on the launch. Read the init capability surface
+ *      via `bridge.status(name).raw.init` (the `BridgePeer.raw` projection).
+ *   2. Assert the real model actually reasoned on launch — either
+ *      Anthropic-style `type:"thinking"` content blocks on the assistant
+ *      message, OR codex-style `usage.reasoningOutputTokens > 0`. Either
+ *      is positive evidence that `thinkingLevel` reached the model.
+ *   3. Send a follow-up `bridge.send` that EXPLICITLY re-passes
+ *      `thinkingLevel`, and assert a second result event appears AND that
+ *      it also shows reasoning evidence. This proves pass-through on a
+ *      subsequent send — the actual scope of the Bridge's #9 contract.
+ *      (Note: `thinkingLevel` is per-send, NOT session-sticky at the
+ *      runtime layer — only `securityMode` and `model` re-apply across
+ *      sends. The smoke does not assert stickiness for `thinkingLevel`.)
+ *   4. Send a third turn that explicitly overrides `securityMode: "safe"`;
+ *      verify the Bridge accepts the override (live sandbox-flag effects
+ *      are covered by `smoke-security.mjs`).
  *
  * Skips a driver when its CLI / SDK / credentials are missing. Exits
  * non-zero if any present-driver assertion fails.
@@ -49,10 +52,12 @@ function record(name, ok, note = "") {
 }
 
 async function waitForIdle(bridge, name, timeoutMs = 180_000) {
+  // BridgePeer.state uses `errored` (not `failed`) for runtime failures —
+  // matches the BridgeState enum in packages/intercom-bridge/src/types.ts.
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const peer = await bridge.status(name);
-    if (peer && ["idle", "interrupted", "failed", "stopped"].includes(peer.state)) {
+    if (peer && ["idle", "interrupted", "errored", "stopped"].includes(peer.state)) {
       return peer;
     }
     await new Promise((r) => setTimeout(r, 200));
@@ -130,15 +135,18 @@ async function runDriver({ driver, peerName, prompt, thinkingLevel, hasCreds }) 
       `reasoningTokens=${ev1.reasoningTokens} thinkingBlocks=${ev1.thinkingBlocks} resultEvents=${ev1.resultCount}`,
     );
 
-    // (2) Send a non-trivial follow-up WITHOUT re-passing fields. Sticky
-    // values must survive (regression coverage for #8 — the entire reason
-    // 1.0 exists). The follow-up has to itself be reasoning-worthy because
-    // Anthropic decides per-prompt whether to emit thinking blocks even
-    // when `effort=max` is sticky; a trivial follow-up would falsely
-    // suggest stickiness regressed.
+    // (2) Send a non-trivial follow-up that EXPLICITLY re-passes
+    // `thinkingLevel`. This is the actual scope of the Bridge's #9
+    // contract: every driver field on the inbound intercom message
+    // reaches the driver verbatim, on every send. `thinkingLevel` is
+    // not session-sticky at the runtime layer (only `securityMode` and
+    // `model` are re-applied), so the way to assert pass-through on a
+    // subsequent send is to set the field again and check the model
+    // reasoned again.
     await bridge.send(peerName, {
       from: "smoke",
       text: "Now solve this: a snail climbs 3 ft up a wall by day and slides 2 ft down at night. The wall is 10 ft. How many days to escape? Explain.",
+      thinkingLevel,
     });
     const afterFollowup = await bridge.status(peerName);
     const bySession = await bridge.statusBySessionId(launched.sessionId);
@@ -153,12 +161,13 @@ async function runDriver({ driver, peerName, prompt, thinkingLevel, hasCreds }) 
       ev2.resultCount > ev1.resultCount,
       `result events: ${ev1.resultCount} → ${ev2.resultCount}`,
     );
-    // Sticky thinking: the follow-up should ALSO show reasoning evidence,
-    // because thinkingLevel was set at launch and is session-sticky on the
-    // runtime side. If pass-through silently regressed sticky semantics,
-    // the second turn would not reason.
+    // Per-send pass-through: the follow-up explicitly re-passed
+    // `thinkingLevel`, so the model should reason again. This catches
+    // "Bridge accepts the field but doesn't actually forward it on
+    // subsequent sends" — a different failure mode than first-send
+    // pass-through.
     record(
-      `${driver}: sticky thinkingLevel survives follow-up send`,
+      `${driver}: thinkingLevel pass-through reaches model on follow-up send`,
       ev2.reasoningTokens > ev1.reasoningTokens || ev2.thinkingBlocks > ev1.thinkingBlocks,
       `reasoningTokens ${ev1.reasoningTokens}→${ev2.reasoningTokens} thinkingBlocks ${ev1.thinkingBlocks}→${ev2.thinkingBlocks}`,
     );
