@@ -4,6 +4,14 @@ All notable changes to this repository should be recorded here.
 
 ## Unreleased
 
+### Fixed
+- `claude-sdk` driver no longer wedges at `state="running"` when the SDK's native child is externally `SIGKILL`ed (issue [#7](https://github.com/durandom/pi-ca-leash/issues/7)). The driver now attaches a watchdog to the SDK's underlying subprocess; on `close`/`exit` it aborts the in-process iterator after a 5 s grace window and the run transitions to `failed` (code 137, signal `SIGKILL`). If the SDK ever stops exposing a reachable subprocess handle the driver logs one warning and degrades to the previous behavior. Decision record: `docs/design-issue-7-claude-sdk-wedge.md`.
+- `securityMode` is now session-sticky across resumes (issue [#8](https://github.com/durandom/pi-ca-leash/issues/8)). `start()` persists the resolved mode into `RuntimeStatus`; `send()` re-applies it on every subsequent turn unless the caller passes an explicit `securityMode` override (which then becomes the new persisted canonical value, matching the existing `model`-override semantics). Previously the codex-cli sandbox silently regressed to `safe` on resume, breaking git writes inside sibling-tree worktrees with `EROFS` on `.git/worktrees/<wt>/index.lock`.
+
+### Added
+- `ClaudeSdkDriver` constructor accepts a `childDeathGraceMs` option (default 5000) for tests and hosts that want a tighter / looser death-detection window.
+- `RuntimeStatus.securityMode` is a new persisted field.
+
 ## 0.16.1 - 2026-05-17
 
 ### Fixed
