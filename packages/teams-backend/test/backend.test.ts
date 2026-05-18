@@ -4,7 +4,6 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, RuntimeDriverRunInput } from "@pi-claude-code-agent/runtime";
-import { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime";
 import { ClaudeRuntimeIntercomBridge } from "@pi-claude-code-agent/intercom-bridge";
 import { ClaudeCodeTeamsBackend, formatTaskAssignment } from "../src/index.js";
 
@@ -33,8 +32,7 @@ class FakeDriver implements RuntimeDriver {
 
 test("spawn teammate, assign task, exchange message, stop", async () => {
   const dir = await mkdtemp(join(tmpdir(), "claude-teams-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(dir, "runtime"), driver: new FakeDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+    const bridge = new ClaudeRuntimeIntercomBridge({ runtimeOptions: { storageDir: join(dir, "runtime"), driver: new FakeDriver() }, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
   const backend = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge });
 
   const teammate = await backend.spawnTeammate({ name: "worker", prompt: "You are teammate." });
@@ -55,12 +53,10 @@ test("explicit codex driver is passed through and persisted on teammate record",
   const dir = await mkdtemp(join(tmpdir(), "claude-teams-test-"));
   const defaultDriver = new FakeDriver("claude-sdk");
   const codexDriver = new FakeDriver("codex-cli");
-  const runtime = new ClaudeCodeRuntime({
-    storageDir: join(dir, "runtime"),
+    const bridge = new ClaudeRuntimeIntercomBridge({ runtimeOptions: { storageDir: join(dir, "runtime"),
     driver: defaultDriver,
     drivers: { "codex-cli": codexDriver },
-  });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+  }, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
   const backend = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge });
 
   const teammate = await backend.spawnTeammate({ name: "worker", prompt: "You are teammate.", driver: "codex-cli" });
@@ -72,8 +68,7 @@ test("explicit codex driver is passed through and persisted on teammate record",
 
 test("backend restore backfills missing teammate driver", async () => {
   const dir = await mkdtemp(join(tmpdir(), "claude-teams-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(dir, "runtime"), driver: new FakeDriver("codex-cli") });
-  const bridge1 = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+    const bridge1 = new ClaudeRuntimeIntercomBridge({ runtimeOptions: { storageDir: join(dir, "runtime"), driver: new FakeDriver("codex-cli") }, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
   const backend1 = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge: bridge1 });
 
   const spawned = await backend1.spawnTeammate({ name: "worker", prompt: "You are teammate.", driver: "codex-cli" });
@@ -82,7 +77,7 @@ test("backend restore backfills missing teammate driver", async () => {
   delete persisted.driver;
   await (await import("node:fs/promises")).writeFile(teammateFile, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
 
-  const bridge2 = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+  const bridge2 = new ClaudeRuntimeIntercomBridge({ runtimeOptions: { storageDir: join(dir, "runtime"), driver: new FakeDriver("codex-cli") }, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
   const backend2 = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge: bridge2 });
   const teammates = await backend2.listTeammates();
   assert.equal(teammates[0]?.driver, "codex-cli");
@@ -91,13 +86,12 @@ test("backend restore backfills missing teammate driver", async () => {
 
 test("backend restores persisted teammates after restart", async () => {
   const dir = await mkdtemp(join(tmpdir(), "claude-teams-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(dir, "runtime"), driver: new FakeDriver() });
-  const bridge1 = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+    const bridge1 = new ClaudeRuntimeIntercomBridge({ runtimeOptions: { storageDir: join(dir, "runtime"), driver: new FakeDriver() }, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
   const backend1 = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge: bridge1 });
 
   await backend1.spawnTeammate({ name: "worker", prompt: "You are teammate." });
 
-  const bridge2 = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+  const bridge2 = new ClaudeRuntimeIntercomBridge({ runtimeOptions: { storageDir: join(dir, "runtime"), driver: new FakeDriver() }, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
   const backend2 = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge: bridge2 });
 
   const teammates = await backend2.listTeammates();
@@ -109,8 +103,7 @@ test("backend restores persisted teammates after restart", async () => {
 
 test("done-like replies auto-complete tasks", async () => {
   const dir = await mkdtemp(join(tmpdir(), "claude-teams-test-"));
-  const runtime = new ClaudeCodeRuntime({ storageDir: join(dir, "runtime"), driver: new FakeDriver() });
-  const bridge = new ClaudeRuntimeIntercomBridge({ runtime, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
+    const bridge = new ClaudeRuntimeIntercomBridge({ runtimeOptions: { storageDir: join(dir, "runtime"), driver: new FakeDriver() }, storageDir: join(dir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 2_000 });
   const backend = new ClaudeCodeTeamsBackend({ storageDir: join(dir, "teams"), bridge });
 
   await backend.spawnTeammate({ name: "worker", prompt: "You are teammate." });

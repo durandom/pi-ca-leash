@@ -5,6 +5,7 @@ import {
   type RuntimeMessageBlock,
   type RuntimeSessionId,
   type RuntimeStatus,
+  type TranscriptChunk,
 } from "@pi-claude-code-agent/runtime";
 import {
   defaultBridgeStorageDir,
@@ -45,7 +46,7 @@ export class ClaudeRuntimeIntercomBridge {
   private readonly peers = new Map<string, BridgePeer>();
 
   constructor(options: BridgeOptions = {}) {
-    this.runtime = options.runtime ?? new ClaudeCodeRuntime();
+    this.runtime = options.runtime ?? new ClaudeCodeRuntime(options.runtimeOptions);
     this.storageDir = resolve(options.storageDir ?? defaultBridgeStorageDir());
     this.transport = options.transport;
     this.pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
@@ -111,6 +112,45 @@ export class ClaudeRuntimeIntercomBridge {
       return undefined;
     }
     return this.syncPeerFromRuntime(name);
+  }
+
+  /**
+   * Look up a peer by its runtime sessionId rather than its registry name.
+   * Useful for callers that received the sessionId from `launchPeer` or from
+   * a runtime event and don't want to keep a name→sessionId map of their own.
+   */
+  async statusBySessionId(sessionId: RuntimeSessionId): Promise<BridgePeer | undefined> {
+    for (const peer of this.peers.values()) {
+      if (peer.sessionId === sessionId) {
+        return this.syncPeerFromRuntime(peer.name);
+      }
+    }
+    await this.restorePeers();
+    for (const peer of this.peers.values()) {
+      if (peer.sessionId === sessionId) {
+        return this.syncPeerFromRuntime(peer.name);
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Fetch the transcript chunk for a sessionId. Thin Bridge-routed wrapper
+   * over the embedded runtime so any future Bridge-side accounting (rate
+   * limiting, telemetry, replay buffers) applies uniformly.
+   */
+  async events(sessionId: RuntimeSessionId, cursor = 0): Promise<TranscriptChunk> {
+    return this.runtime.events(sessionId, cursor);
+  }
+
+  /**
+   * Subscribe to raw runtime events, optionally filtered to a single
+   * sessionId. Returns an unsubscribe function. This is a passthrough — the
+   * caller sees the underlying `RuntimeEvent` stream, not the Bridge's own
+   * lifecycle envelope.
+   */
+  subscribe(listener: (event: RuntimeEvent) => void, sessionId?: RuntimeSessionId): () => void {
+    return this.runtime.subscribe(listener, sessionId);
   }
 
   async reconcilePeers(): Promise<BridgePeer[]> {
@@ -269,10 +309,18 @@ export class ClaudeRuntimeIntercomBridge {
 
     const before = await this.runtime.events(peer.sessionId);
     const cursor = before.nextCursor;
+    // Pass-through invariant: forward every driver field from `inbound`
+    // verbatim. The Bridge overrides only what it owns (sessionId, the
+    // formatted message envelope). Drivers ignore fields they don't
+    // understand — adding a new driver field must NOT require a Bridge change.
     const sentStatus = await this.runtime.send({
+      appendSystemPrompt: inbound.appendSystemPrompt,
+      env: inbound.env,
+      thinkingLevel: inbound.thinkingLevel,
+      securityMode: inbound.securityMode,
+      model: inbound.model,
       sessionId: peer.sessionId,
       message: formatInboundMessage(inbound),
-      model: inbound.model,
     });
 
     if (!options.waitForIdle) {
@@ -369,6 +417,7 @@ export class ClaudeRuntimeIntercomBridge {
       lastActivityAt: status.lastActivityAt,
       kind: preserved.kind,
       metadata: cloneMetadata(preserved.metadata),
+      raw: status.raw,
     };
   }
 

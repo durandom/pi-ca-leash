@@ -1,5 +1,11 @@
 import { resolve } from "node:path";
-import { ClaudeCodeRuntime, type RuntimeDriverName } from "@pi-claude-code-agent/runtime";
+import type {
+  RuntimeDriverName,
+  RuntimeEvent,
+  RuntimeOptions,
+  RuntimeSessionId,
+  TranscriptChunk,
+} from "@pi-claude-code-agent/runtime";
 import { ClaudeRuntimeIntercomBridge } from "./bridge.js";
 import type {
   AskResult,
@@ -26,23 +32,31 @@ export function piCaLeashBridgeStorageDir(cwd = process.cwd()): string {
 
 export interface ManagedPeerApiOptions extends Pick<BridgeOptions, "transport" | "pollIntervalMs" | "askTimeoutMs"> {
   cwd?: string;
-  runtime?: ClaudeCodeRuntime;
   bridge?: ClaudeRuntimeIntercomBridge;
   defaultDriver?: RuntimeDriverName;
+  /**
+   * Optional overrides for the embedded Runtime's construction. Merged on top
+   * of the defaults derived from `cwd` and `defaultDriver`. Use this to inject
+   * a custom driver/resolver (e.g. tests with a fake driver) without exposing
+   * the Runtime instance.
+   */
+  runtimeOptions?: Omit<RuntimeOptions, "storageDir" | "defaultDriver"> & {
+    storageDir?: string;
+    defaultDriver?: RuntimeDriverName;
+  };
 }
 
 export class PiCaLeashManagedPeerApi {
-  readonly runtime: ClaudeCodeRuntime;
   readonly bridge: ClaudeRuntimeIntercomBridge;
 
   constructor(options: ManagedPeerApiOptions = {}) {
     const cwd = resolve(options.cwd ?? process.cwd());
-    this.runtime = options.runtime ?? new ClaudeCodeRuntime({
-      storageDir: piCaLeashRuntimeStorageDir(cwd),
-      defaultDriver: options.defaultDriver,
-    });
     this.bridge = options.bridge ?? new ClaudeRuntimeIntercomBridge({
-      runtime: this.runtime,
+      runtimeOptions: {
+        storageDir: piCaLeashRuntimeStorageDir(cwd),
+        defaultDriver: options.defaultDriver,
+        ...options.runtimeOptions,
+      },
       storageDir: piCaLeashBridgeStorageDir(cwd),
       transport: options.transport,
       pollIntervalMs: options.pollIntervalMs,
@@ -70,6 +84,18 @@ export class PiCaLeashManagedPeerApi {
 
   async status(name: string): Promise<BridgePeer | undefined> {
     return this.bridge.status(name);
+  }
+
+  async statusBySessionId(sessionId: RuntimeSessionId): Promise<BridgePeer | undefined> {
+    return this.bridge.statusBySessionId(sessionId);
+  }
+
+  async events(sessionId: RuntimeSessionId, cursor = 0): Promise<TranscriptChunk> {
+    return this.bridge.events(sessionId, cursor);
+  }
+
+  subscribe(listener: (event: RuntimeEvent) => void, sessionId?: RuntimeSessionId): () => void {
+    return this.bridge.subscribe(listener, sessionId);
   }
 
   async reconcilePeers(): Promise<BridgePeer[]> {
