@@ -1,10 +1,10 @@
 import type {
-  ClaudeCodeRuntime,
   RuntimeDriverName,
   RuntimeEvent,
   RuntimeSessionId,
   RuntimeSessionState,
 } from "@pi-claude-code-agent/runtime";
+import type { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime/internal";
 
 export type SubagentRunner = "pi" | "claude-code-agent";
 export type SubagentContextMode = "fresh" | "fork";

@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import {
-  ClaudeCodeRuntime,
   type RuntimeEvent,
   type RuntimeSessionState,
   type RuntimeStatus,
 } from "@pi-claude-code-agent/runtime";
+import { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime/internal";
 import {
   appendRunEvent,
   defaultRunsDir,

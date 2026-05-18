@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { ClaudeCodeRuntime, resolveRuntimeDriverFromEnv } from "@pi-claude-code-agent/runtime";
+import { resolveRuntimeDriverFromEnv } from "@pi-claude-code-agent/runtime";
+import { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime/internal";
 import { ClaudeCodeSubagentBackend } from "./backend.js";
 
 const runtime = new ClaudeCodeRuntime({ defaultDriver: resolveRuntimeDriverFromEnv() });

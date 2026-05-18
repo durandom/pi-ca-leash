@@ -4,7 +4,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, RuntimeDriverRunInput } from "@pi-claude-code-agent/runtime";
-import { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime";
+import { ClaudeCodeRuntime } from "@pi-claude-code-agent/runtime/internal";
 import {
   ClaudeCodeSubagentBackend,
   buildTaskPrompt,
