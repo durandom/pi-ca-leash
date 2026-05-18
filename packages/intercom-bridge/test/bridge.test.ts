@@ -792,8 +792,10 @@ test("launchPeer omits thinkingLevel when caller does not supply one", async () 
 test("deliver forwards driver passthrough fields verbatim to runtime.send (regression: #8, #9)", async () => {
   // Pass-through invariant: every driver-recognised field on an outbound
   // intercom message must reach the driver's `run` call unchanged. Without
-  // this, session-sticky semantics (securityMode, thinkingLevel) silently
-  // regress on every send — see issue #8.
+  // this, fields that depend on per-send delivery (e.g. `thinkingLevel`,
+  // `appendSystemPrompt`, `env`) silently drop, and the only field that
+  // is session-sticky at the runtime layer (`securityMode`) cannot be
+  // overridden via the Bridge — both shapes caused #8.
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
   const driver = new FakeDriver();
   const bridge = new ClaudeRuntimeIntercomBridge({

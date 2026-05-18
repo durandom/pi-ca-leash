@@ -310,15 +310,16 @@ export class ClaudeRuntimeIntercomBridge {
     const before = await this.runtime.events(peer.sessionId);
     const cursor = before.nextCursor;
     // Pass-through invariant: forward every driver field from `inbound`
-    // verbatim. The Bridge overrides only what it owns (sessionId, the
-    // formatted message envelope). Drivers ignore fields they don't
-    // understand — adding a new driver field must NOT require a Bridge change.
+    // verbatim. The Bridge owns (and overrides) `sessionId` and the
+    // formatted `message` envelope; everything else flows through as-is.
+    // Drivers ignore fields they don't understand. The destructure here
+    // strips Bridge-only fields (`kind`/`from`/`text`/`replyTo`/`timeoutMs`)
+    // and spreads the remainder — so adding a new driver field to
+    // `IntercomInboundMessage` propagates automatically without touching
+    // this method.
+    const { kind: _kind, from: _from, text: _text, replyTo: _replyTo, timeoutMs: _timeoutMs, ...passthrough } = inbound;
     const sentStatus = await this.runtime.send({
-      appendSystemPrompt: inbound.appendSystemPrompt,
-      env: inbound.env,
-      thinkingLevel: inbound.thinkingLevel,
-      securityMode: inbound.securityMode,
-      model: inbound.model,
+      ...passthrough,
       sessionId: peer.sessionId,
       message: formatInboundMessage(inbound),
     });
