@@ -432,7 +432,25 @@ export class ClaudeSdkDriver implements RuntimeDriver {
       settingSources: ["project", "user"],
     };
     if (input.env) {
-      result.env = input.env;
+      // claude-agent-sdk's spawn path treats `options.env` as the FULL
+      // subprocess env (no merge with process.env) — see sdk.mjs:
+      // `let{...env:H={...process.env},...}=this.options` only applies
+      // the default when this.options.env is undefined. With env set,
+      // H becomes only the caller's dict and the subprocess loses
+      // PATH, HOME, OTEL_EXPORTER_OTLP_*, every auth and exporter env.
+      //
+      // Callers that pass `env` expect their values to OVERLAY
+      // process.env (Node spawn-inheritance semantics), not replace
+      // it. Merge process.env first so that contract holds.
+      //
+      // Filter out undefined entries: process.env's TS type is
+      // `Record<string, string|undefined>`, but spawn() rejects
+      // undefined values on some platforms.
+      const baseEnv: Record<string, string> = {};
+      for (const [k, v] of Object.entries(process.env)) {
+        if (v !== undefined) baseEnv[k] = v;
+      }
+      result.env = { ...baseEnv, ...input.env };
     }
     if (process.env.CLAUDE_CODE_EXECUTABLE) {
       result.pathToClaudeCodeExecutable = process.env.CLAUDE_CODE_EXECUTABLE;
