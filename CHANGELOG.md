@@ -2,6 +2,11 @@
 
 All notable changes to this repository should be recorded here.
 
+## 1.1.1 - 2026-05-26
+
+### Fixed — claude-sdk driver env merge (#15)
+- The `claude-sdk` driver now merges `process.env` with caller-supplied `input.env` before handing options to `claude-agent-sdk`'s `query()`. Sibling drivers (`codex-cli`, `claude-cli`) already did this — claude-sdk was the outlier. The SDK's internal spawn path destructures `options.env` with a default of `{...process.env}`, but that default only fires when the key is *absent*; once a caller passes any partial env dict, the spawned `claude` subprocess sees ONLY those keys and loses PATH, HOME, and every other variable the parent process had. The most visible symptom was OTel telemetry silently dropping from spawned subprocesses (downstream b4arena/spellkave#346), but the bug applied to any caller passing partial env overrides. Caller-supplied keys still take precedence; undefined values are filtered to satisfy `child_process.spawn`. `pi-coding-agent` runs in-process and is unaffected.
+
 ## 1.1.0 - 2026-05-18
 
 ### Added — Bridge `waitForCompletion` (#14)
