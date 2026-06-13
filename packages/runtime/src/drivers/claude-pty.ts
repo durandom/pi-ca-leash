@@ -93,6 +93,12 @@ export interface ClaudePtyDriverOptions {
   startupMinMs?: number;
   /** Delay between bracketed-paste of the prompt and the submitting Enter. */
   submitDelayMs?: number;
+  /**
+   * Delay before retrying Enter when the prompt is still visible and no hook
+   * has fired. This covers transient Claude Code TUI overlays swallowing the
+   * first submit key.
+   */
+  submitRetryDelayMs?: number;
   /** Poll cadence for the hook-payload file. */
   pollIntervalMs?: number;
   /** Hard cap for a single turn before giving up. */
@@ -147,11 +153,22 @@ function stripAnsi(s: string): string {
     .replace(/\s+/g, " ");
 }
 
+function compactText(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function promptStillVisible(rawTail: string, prompt: string): boolean {
+  const needle = compactText(prompt).slice(-160);
+  if (!needle) return false;
+  return compactText(stripAnsi(rawTail)).includes(needle);
+}
+
 const DEFAULTS = {
   readyQuietMs: 600,
   readyTimeoutMs: 15_000,
   startupMinMs: 1_500,
   submitDelayMs: 40,
+  submitRetryDelayMs: 1_000,
   pollIntervalMs: 120,
   turnTimeoutMs: 10 * 60_000,
   quitGraceMs: 3_000,
@@ -297,6 +314,7 @@ export class ClaudePtyDriver implements RuntimeDriver {
       readyTimeoutMs: options.readyTimeoutMs ?? DEFAULTS.readyTimeoutMs,
       startupMinMs: options.startupMinMs ?? DEFAULTS.startupMinMs,
       submitDelayMs: options.submitDelayMs ?? DEFAULTS.submitDelayMs,
+      submitRetryDelayMs: options.submitRetryDelayMs ?? DEFAULTS.submitRetryDelayMs,
       pollIntervalMs: options.pollIntervalMs ?? DEFAULTS.pollIntervalMs,
       turnTimeoutMs: options.turnTimeoutMs ?? DEFAULTS.turnTimeoutMs,
       quitGraceMs: options.quitGraceMs ?? DEFAULTS.quitGraceMs,
@@ -375,6 +393,8 @@ export class ClaudePtyDriver implements RuntimeDriver {
       session.proc.write(`\x1b[200~${input.prompt}\x1b[201~`);
       await sleep(this.opts.submitDelayMs);
       session.proc.write("\r");
+      const submittedAt = Date.now();
+      let submitRetried = false;
 
       // Wait for the turn to end: a Stop hook line. PostToolUse lines stream
       // tool_use/tool_result messages in the meantime.
@@ -400,6 +420,15 @@ export class ClaudePtyDriver implements RuntimeDriver {
         const { turnEnded } = await this.pumpHooks(session, onEvent);
         if (turnEnded) {
           return { code: 0, signal: null };
+        }
+        if (
+          !submitRetried &&
+          Date.now() - submittedAt >= this.opts.submitRetryDelayMs &&
+          promptStillVisible(session.rawTail, input.prompt)
+        ) {
+          dbg("prompt still visible after submit; retrying Enter");
+          session.proc.write("\r");
+          submitRetried = true;
         }
         if (Date.now() > deadline) {
           await onEvent({

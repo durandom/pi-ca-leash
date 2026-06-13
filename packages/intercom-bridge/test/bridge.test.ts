@@ -285,10 +285,10 @@ test("ask timeout returns delivered_and_running instead of throwing after delive
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
     const bridge = new ClaudeRuntimeIntercomBridge({
     runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() },
-    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 200 });
 
   await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
-  const result = await bridge.ask("worker", { from: "planner", text: "slow follow-up" });
+  const result = await bridge.ask("worker", { from: "planner", text: "slow follow-up", timeoutMs: 10 });
 
   assert.equal(result.deliveryState, "delivered_and_running");
   assert.equal(result.reply, "");
@@ -299,7 +299,7 @@ test("send can deliver fire-and-forget without waiting for idle", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
     const bridge = new ClaudeRuntimeIntercomBridge({
     runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() },
-    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 200 });
 
   await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
   const started = Date.now();
@@ -375,7 +375,7 @@ test("interrupt signals a busy peer and keeps it registered", async () => {
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
     const bridge = new ClaudeRuntimeIntercomBridge({
     runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() },
-    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 200 });
 
   await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
   await bridge.send("worker", { from: "planner", text: "slow send" }, { waitForIdle: false });
@@ -390,7 +390,7 @@ test("interruptWithResult reports whether the runtime was signalled", async () =
   const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
     const bridge = new ClaudeRuntimeIntercomBridge({
     runtimeOptions: { storageDir: join(storageDir, "runtime"), driver: new SlowResumeDriver() },
-    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 10 });
+    storageDir: join(storageDir, "bridge"), pollIntervalMs: 5, askTimeoutMs: 200 });
 
   await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
 

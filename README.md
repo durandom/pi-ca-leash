@@ -75,7 +75,7 @@ pi install npm:pi-ca-leash
 Pin an explicit version when needed:
 
 ```bash
-pi install npm:pi-ca-leash@1.2.1
+pi install npm:pi-ca-leash@1.2.2
 ```
 
 Local checkout install:

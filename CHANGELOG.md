@@ -2,6 +2,12 @@
 
 All notable changes to this repository should be recorded here.
 
+## 1.2.2 - 2026-06-13
+
+### Fixed — `claude-pty` retries swallowed TUI submits
+
+- `claude-pty` now retries the submit Enter when the prompt remains visible in the PTY shortly after the first submit and no hook has fired. This covers Claude Code interactive overlays/toasts that can transiently consume the first Enter: the prompt was visibly pasted into the input box, but no model turn started and the driver waited until the caller's outer timeout. The retry is guarded by the rendered prompt still being present, so normal turns continue unchanged.
+
 ## 1.2.1 - 2026-06-13
 
 ### Fixed — `claude-pty` teardown no longer hangs on a stuck TUI

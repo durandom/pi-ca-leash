@@ -71,6 +71,7 @@ const FAST = {
   readyTimeoutMs: 300,
   startupMinMs: 20,
   submitDelayMs: 3,
+  submitRetryDelayMs: 20,
   pollIntervalMs: 8,
   turnTimeoutMs: 2_000,
   quitGraceMs: 20,
@@ -118,6 +119,42 @@ test("interactive turn: types prompt, emits hook tool + assistant, ends on Stop"
     (e) => e.type === "message" && e.payload.type === "assistant",
   );
   assert.ok(assistant, "assistant message emitted from Stop hook");
+  await driver.dispose(sessionId);
+});
+
+test("interactive turn retries Enter when the prompt remains visible", async () => {
+  const sessionId = "sess-submit-retry";
+  const h = await makeHarness(sessionId);
+  const fake = new FakePty();
+  let submitCount = 0;
+
+  fake.onWrite = async (data, self) => {
+    if (data.includes("retry me")) {
+      self.emitData(data);
+    }
+    if (data === "\r") {
+      submitCount += 1;
+      if (submitCount === 2) {
+        await appendFile(h.hooksPath, stopLine("submitted after retry"));
+      }
+    }
+    if (data === "/quit\r") fake.exit(0);
+  };
+
+  const driver = new ClaudePtyDriver({
+    ptySpawn: () => fake,
+    configDir: h.configDir,
+    ...FAST,
+  });
+
+  const handle = driver.run(
+    { sessionId, prompt: "retry me", cwd: h.root, securityMode: "yolo", sessionStorageDir: h.sessionStorageDir },
+    () => {},
+  );
+  const result = await handle.done;
+
+  assert.equal(result.code, 0);
+  assert.equal(submitCount, 2, "second Enter retries a swallowed submit");
   await driver.dispose(sessionId);
 });
 
