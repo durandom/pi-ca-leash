@@ -14,6 +14,7 @@ class FakePty implements PtyProcessLike {
   private exitCb?: (event: { exitCode: number; signal?: number }) => void;
   /** Test hook fired on every write (used to simulate claude's reaction). */
   onWrite?: (data: string, self: FakePty) => void | Promise<void>;
+  readonly kills: (string | undefined)[] = [];
 
   write(data: string): void {
     this.writes.push(data);
@@ -25,7 +26,8 @@ class FakePty implements PtyProcessLike {
   onExit(cb: (event: { exitCode: number; signal?: number }) => void): void {
     this.exitCb = cb;
   }
-  kill(): void {
+  kill(signal?: string): void {
+    this.kills.push(signal);
     this.exit(0);
   }
   emitData(data: string): void {
@@ -71,6 +73,8 @@ const FAST = {
   submitDelayMs: 3,
   pollIntervalMs: 8,
   turnTimeoutMs: 2_000,
+  quitGraceMs: 20,
+  killGraceMs: 20,
 };
 
 test("interactive turn: types prompt, emits hook tool + assistant, ends on Stop", async () => {
@@ -165,6 +169,37 @@ test("dispose() types /quit into the live TUI", async () => {
   await driver.dispose(sessionId);
 
   assert.ok(fake.writes.includes("/quit\r"), "/quit sent on dispose");
+});
+
+test("dispose() escalates when /quit does not make the TUI exit", async () => {
+  const sessionId = "sess-quit-stuck";
+  const h = await makeHarness(sessionId);
+  const fake = new FakePty();
+  fake.onWrite = async (data) => {
+    if (data === "\r") {
+      await appendFile(h.hooksPath, stopLine("done"));
+    }
+    // Reproducer for the CI hang: Claude's Stop hook fired and the turn is
+    // complete, but the interactive TUI ignores /quit and keeps the PTY alive.
+    if (data === "/quit\r") {
+      // no exit
+    }
+  };
+  fake.kill = (signal?: string) => {
+    fake.kills.push(signal);
+    if (signal === "SIGKILL") fake.exit(0);
+  };
+  const driver = new ClaudePtyDriver({ ptySpawn: () => fake, configDir: h.configDir, ...FAST });
+
+  const handle = driver.run(
+    { sessionId, prompt: "x", cwd: h.root, securityMode: "yolo", sessionStorageDir: h.sessionStorageDir },
+    () => {},
+  );
+  await handle.done;
+  await driver.dispose(sessionId);
+
+  assert.ok(fake.writes.includes("/quit\r"), "/quit attempted first");
+  assert.deepEqual(fake.kills, ["SIGTERM", "SIGKILL"]);
 });
 
 test("kill() sends ESC and resolves the turn as interrupted", async () => {

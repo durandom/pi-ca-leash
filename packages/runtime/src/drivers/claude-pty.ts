@@ -97,6 +97,10 @@ export interface ClaudePtyDriverOptions {
   pollIntervalMs?: number;
   /** Hard cap for a single turn before giving up. */
   turnTimeoutMs?: number;
+  /** How long dispose() waits for `/quit` to close the TUI before TERM. */
+  quitGraceMs?: number;
+  /** How long dispose() waits after TERM before escalating to KILL. */
+  killGraceMs?: number;
 }
 
 interface PtySession {
@@ -150,12 +154,19 @@ const DEFAULTS = {
   submitDelayMs: 40,
   pollIntervalMs: 120,
   turnTimeoutMs: 10 * 60_000,
+  quitGraceMs: 3_000,
+  killGraceMs: 750,
 };
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const nowMs = () => Date.now();
 const dbg = (msg: string) => {
   if (process.env.CLAUDE_PTY_DEBUG) process.stderr.write(`[claude-pty] ${msg}\n`);
+};
+const dbgRaw = (data: string) => {
+  if (!process.env.CLAUDE_PTY_DEBUG_RAW) return;
+  const clean = stripAnsi(data).trim();
+  if (clean) process.stderr.write(`[claude-pty-raw] ${clean.slice(-2000)}\n`);
 };
 
 /** POSIX single-quote a string for safe embedding in a shell command. */
@@ -288,6 +299,8 @@ export class ClaudePtyDriver implements RuntimeDriver {
       submitDelayMs: options.submitDelayMs ?? DEFAULTS.submitDelayMs,
       pollIntervalMs: options.pollIntervalMs ?? DEFAULTS.pollIntervalMs,
       turnTimeoutMs: options.turnTimeoutMs ?? DEFAULTS.turnTimeoutMs,
+      quitGraceMs: options.quitGraceMs ?? DEFAULTS.quitGraceMs,
+      killGraceMs: options.killGraceMs ?? DEFAULTS.killGraceMs,
     };
   }
 
@@ -432,18 +445,29 @@ export class ClaudePtyDriver implements RuntimeDriver {
     } catch {
       // fall through to force-kill
     }
-    // Wait briefly for a clean exit, then force-kill.
-    const deadline = Date.now() + 3_000;
+    if (await this.awaitExit(session, this.opts.quitGraceMs)) return;
+
+    try {
+      session.proc.kill("SIGTERM");
+    } catch {
+      // fall through to SIGKILL
+    }
+    if (await this.awaitExit(session, this.opts.killGraceMs)) return;
+
+    try {
+      session.proc.kill("SIGKILL");
+    } catch {
+      // already gone
+    }
+    await this.awaitExit(session, this.opts.killGraceMs);
+  }
+
+  private async awaitExit(session: PtySession, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
     while (!session.exited && Date.now() < deadline) {
       await sleep(50);
     }
-    if (!session.exited) {
-      try {
-        session.proc.kill();
-      } catch {
-        // already gone
-      }
-    }
+    return session.exited;
   }
 
   private async ensureSession(
@@ -518,6 +542,7 @@ export class ClaudePtyDriver implements RuntimeDriver {
     proc.onData((data: string) => {
       session.lastDataAt = nowMs();
       session.rawTail = (session.rawTail + data).slice(-RAW_TAIL_MAX);
+      dbgRaw(data);
     });
     proc.onExit(({ exitCode }) => {
       session.exited = true;
@@ -629,6 +654,7 @@ export class ClaudePtyDriver implements RuntimeDriver {
         cwd: options.cwd,
         env: { ...options.env, PI_PTY_COLS: String(options.cols), PI_PTY_ROWS: String(options.rows) },
         stdio: ["pipe", "pipe", "pipe"],
+        detached: true,
       },
     );
     let stderr = "";
@@ -653,7 +679,16 @@ export class ClaudePtyDriver implements RuntimeDriver {
         );
       },
       kill: (signal?: string) => {
-        child.kill((signal as NodeJS.Signals) ?? "SIGTERM");
+        const sig = (signal as NodeJS.Signals) ?? "SIGTERM";
+        if (child.pid) {
+          try {
+            process.kill(-child.pid, sig);
+            return;
+          } catch (err) {
+            dbg(`python pty process-group kill failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        child.kill(sig);
       },
     };
   };
@@ -663,12 +698,22 @@ export class ClaudePtyDriver implements RuntimeDriver {
 // forks a pty, execs argv[1:], and relays stdin<->master<->stdout until the
 // child exits, propagating its exit code. Kept dependency-free (stdlib only).
 const PTY_ALLOCATOR = [
-  "import os,pty,sys,fcntl,termios,struct,select",
+  "import os,pty,sys,fcntl,termios,struct,select,signal",
   'cols=int(os.environ.get("PI_PTY_COLS","120"));rows=int(os.environ.get("PI_PTY_ROWS","40"))',
   "argv=sys.argv[1:]",
   "pid,fd=pty.fork()",
   "if pid==0:",
   "    os.execvp(argv[0],argv);os._exit(127)",
+  "def forward(sig,frame):",
+  "    try:",
+  "        os.kill(pid,sig)",
+  "    except ProcessLookupError:",
+  "        pass",
+  "for sig in (signal.SIGTERM,signal.SIGINT,signal.SIGHUP):",
+  "    try:",
+  "        signal.signal(sig,forward)",
+  "    except Exception:",
+  "        pass",
   "try:",
   '    fcntl.ioctl(fd,termios.TIOCSWINSZ,struct.pack("HHHH",rows,cols,0,0))',
   "except Exception:",

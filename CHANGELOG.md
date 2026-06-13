@@ -2,6 +2,14 @@
 
 All notable changes to this repository should be recorded here.
 
+## 1.2.1 - 2026-06-13
+
+### Fixed — `claude-pty` teardown no longer hangs on a stuck TUI
+
+- `dispose()` now escalates teardown instead of relying on a single `/quit`. It types `/quit` and waits `quitGraceMs` (default 3s); if the interactive TUI ignores it and the PTY stays alive, it sends `SIGTERM`, waits `killGraceMs` (default 750ms), then `SIGKILL`. Previously a TUI that swallowed `/quit` after its `Stop` hook had already fired left the process running until a single best-effort `kill()` with no escalation — the observed CI hang. Both grace windows are configurable via new `ClaudePtyDriverOptions.quitGraceMs` / `killGraceMs`.
+- The inline Python PTY allocator is now spawned `detached` (its own process group) and forwards `SIGTERM`/`SIGINT`/`SIGHUP` to the child `claude`, and teardown signals the whole process group (`process.kill(-pid)`). This stops orphaned `claude` processes surviving when only the Python wrapper was signalled.
+- New opt-in `CLAUDE_PTY_DEBUG_RAW=1` dumps ANSI-stripped PTY output to stderr for diagnosing silent/stuck sessions.
+
 ## 1.2.0 - 2026-06-13
 
 ### Added — `claude-pty` runtime driver
