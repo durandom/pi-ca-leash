@@ -11,7 +11,7 @@ Claude Code and Codex CLI are more than model endpoints. They are coding harness
 
 Pi stays in the brain seat — like a human coordinating multiple coding agents. It can start long-lived workers, hand them scoped tasks, wait for results, inspect what they did, and decide what happens next.
 
-Claude is the default and most complete path today. `claude-cli` is available as an optional local CLI-backed Claude path. Codex works too, but is still experimental and not parity-complete.
+Claude is the default and most complete path today. `claude-cli` is available as an optional local CLI-backed Claude path, and `claude-pty` drives the real interactive Claude Code TUI in a persistent pseudo-terminal so context stays hot across turns (no native dependency — it allocates the PTY via `python3`). Codex works too, but is still experimental and not parity-complete.
 
 ## What it adds
 
@@ -75,7 +75,7 @@ pi install npm:pi-ca-leash
 Pin an explicit version when needed:
 
 ```bash
-pi install npm:pi-ca-leash@1.1.1
+pi install npm:pi-ca-leash@1.2.0
 ```
 
 Local checkout install:
