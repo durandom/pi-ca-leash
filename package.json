@@ -1,6 +1,6 @@
 {
   "name": "pi-ca-leash",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Harness-aware Claude Code and Codex CLI extension for pi",
   "license": "MIT",
   "repository": {
@@ -68,6 +68,7 @@
     "smoke:dev:codex": "npm test && npm run build && npm run smoke:pi:auto:codex",
     "smoke:security": "node ./scripts/smoke-security.mjs",
     "smoke:thinking": "node ./scripts/smoke-thinking.mjs",
+    "smoke:pty": "node ./scripts/smoke-pty.mjs",
     "smoke:bridge-passthrough": "node ./scripts/smoke-bridge-passthrough.mjs",
     "smoke:bridge-parity": "node ./scripts/smoke-bridge-parity.mjs",
     "smoke:bridge": "npm run smoke:bridge-passthrough && npm run smoke:bridge-parity",
@@ -93,10 +94,10 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.126",
     "@earendil-works/pi-coding-agent": "^0.74.0",
-    "@pi-claude-code-agent/intercom-bridge": "1.1.1",
-    "@pi-claude-code-agent/runtime": "1.1.1",
-    "@pi-claude-code-agent/subagents-backend": "1.1.1",
-    "@pi-claude-code-agent/teams-backend": "1.1.1"
+    "@pi-claude-code-agent/intercom-bridge": "1.2.0",
+    "@pi-claude-code-agent/runtime": "1.2.0",
+    "@pi-claude-code-agent/subagents-backend": "1.2.0",
+    "@pi-claude-code-agent/teams-backend": "1.2.0"
   },
   "bundledDependencies": [
     "@pi-claude-code-agent/runtime",

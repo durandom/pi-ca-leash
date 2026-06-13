@@ -1,7 +1,12 @@
 import type { NormalizedDriverMessage } from "./drivers/messages.js";
 
 export type RuntimeSessionId = string;
-export type RuntimeDriverName = "claude-sdk" | "claude-cli" | "codex-cli" | "pi-coding-agent";
+export type RuntimeDriverName =
+  | "claude-sdk"
+  | "claude-cli"
+  | "claude-pty"
+  | "codex-cli"
+  | "pi-coding-agent";
 
 export type RuntimeSessionState =
   | "starting"
@@ -311,6 +316,14 @@ export interface RuntimeDriver {
     input: RuntimeDriverRunInput,
     onEvent: (event: DriverEventEnvelope) => Promise<void> | void,
   ): RuntimeDriverRunHandle;
+  /**
+   * Optional graceful teardown for drivers that hold long-lived per-session
+   * state (e.g. `claude-pty`'s persistent PTY). The runtime calls this
+   * from `stop()` so a stateful driver can release its process — for the
+   * interactive driver this types `/quit` into the live TUI. Spawn-per-turn
+   * drivers (sdk/cli/codex) hold no cross-turn state and omit it.
+   */
+  dispose?(sessionId: RuntimeSessionId): Promise<void> | void;
 }
 
 export type RuntimeDriverResolver = (name: RuntimeDriverName) => RuntimeDriver;

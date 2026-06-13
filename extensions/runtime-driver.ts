@@ -9,6 +9,7 @@ export function parseRuntimeDriverName(value: unknown): RuntimeDriverName | unde
   const trimmed = value.trim();
   return trimmed === "claude-sdk" ||
     trimmed === "claude-cli" ||
+    trimmed === "claude-pty" ||
     trimmed === "codex-cli" ||
     trimmed === "pi-coding-agent"
     ? trimmed

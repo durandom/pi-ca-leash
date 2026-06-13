@@ -23,7 +23,7 @@ export function explainRuntimeFailure(message: string, driver?: string, model?: 
   if (lower.includes("enoent") || lower.includes("spawn") && lower.includes("not found")) {
     const binary = driver === "codex-cli"
       ? "codex"
-      : driver === "claude-cli"
+      : driver === "claude-cli" || driver === "claude-pty"
         ? "claude"
         : driver === "claude-sdk"
           ? "Claude Code"

@@ -207,7 +207,7 @@ Primary slash-command surface:
 /peer ask <name> | <message>
 /peer send <name> | <message>
 /peer list
-/peer models [claude-sdk|claude-cli|codex-cli] [all|advanced|verbose]
+/peer models [claude-sdk|claude-cli|claude-pty|codex-cli|pi-coding-agent] [all|advanced|verbose]
 /peer history <name> [cursor] [limit]
 /peer interrupt <name>
 /peer stop <name>
@@ -281,8 +281,9 @@ Result: managed peers created by another extension can show up in the live `/pee
 Runtime driver notes:
 - `claude-sdk` is the default and most complete path
 - `claude-cli` shells out to local `claude -p --output-format stream-json`; it avoids importing the Agent SDK package, but still uses Claude Code non-interactively
+- `claude-pty` drives the **real interactive Claude Code TUI** in a pseudo-terminal — one long-lived process per session, so context stays hot across turns. It observes the session via injected `Stop`/`PostToolUse` hooks (the interactive TUI does not flush its transcript), is `yolo`-only for now, and requires **`python3` on PATH** (used to allocate the PTY with zero native dependencies; override with `PI_PTY_PYTHON`)
 - `codex-cli` is supported, but still experimental and not parity-complete
-- `PI_CLAUDE_RUNTIME_DRIVER=claude-cli` or `PI_CLAUDE_RUNTIME_DRIVER=codex-cli` changes the default for newly started peers
+- `PI_CLAUDE_RUNTIME_DRIVER=claude-cli`, `claude-pty`, or `codex-cli` changes the default for newly started peers
 - `/peer models` and LLM-callable `runtime_models` show a short recommended model list by default, including advisory use cases
 - `/peer models ... all` and `runtime_models(verbose: true)` expose the full bundled Lanista-derived model catalog
 - LLM-callable `peer_start`, `peer_ask`, and `peer_send` can pass explicit model ids

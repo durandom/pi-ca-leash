@@ -38,7 +38,7 @@ export function parseSubagentRunToolInput(input: {
 
   const driver = input.driver == null ? undefined : parseRuntimeDriverName(input.driver);
   if (input.driver != null && !driver) {
-    throw new Error("driver must be claude-sdk, claude-cli, or codex-cli");
+    throw new Error("driver must be claude-sdk, claude-cli, claude-pty, codex-cli, or pi-coding-agent");
   }
 
   return {
@@ -67,7 +67,7 @@ export function parseTeamSpawnToolInput(input: {
 
   const driver = input.driver == null ? undefined : parseRuntimeDriverName(input.driver);
   if (input.driver != null && !driver) {
-    throw new Error("driver must be claude-sdk, claude-cli, or codex-cli");
+    throw new Error("driver must be claude-sdk, claude-cli, claude-pty, codex-cli, or pi-coding-agent");
   }
 
   return {

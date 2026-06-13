@@ -55,6 +55,7 @@ export function defaultStaleThresholdMsForDriver(driver: RuntimeDriverName): num
   switch (driver) {
     case "claude-sdk":
     case "claude-cli":
+    case "claude-pty":
       return 2 * 60_000;
     case "codex-cli":
     case "pi-coding-agent":

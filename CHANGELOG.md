@@ -2,6 +2,18 @@
 
 All notable changes to this repository should be recorded here.
 
+## 1.2.0 - 2026-06-13
+
+### Added — `claude-pty` runtime driver
+
+- New fifth runtime driver `claude-pty` that drives the **real Claude Code interactive TUI** instead of the one-shot `claude -p` / SDK paths. It keeps ONE long-lived interactive `claude` process alive per session inside a pseudo-terminal and types each turn's prompt into it, so conversation context stays hot in the live process — no per-turn cold start, no `--resume` transcript reload between turns. Select it via `driver: "claude-pty"`, `PI_CLAUDE_RUNTIME_DRIVER=claude-pty`, or config `defaultDriver`.
+- **Observation is hook-based, not screen-scraped.** The interactive TUI keeps its transcript in memory and never flushes the session JSONL the way the headless path does, so the driver injects a per-invocation `--settings` file (the user's `~/.claude/settings.json` and other running sessions are untouched) registering `PostToolUse` + `Stop` command hooks. Each hook appends its JSON payload to a per-session `hooks.jsonl` the driver tails: `PostToolUse` → normalized `tool_use` / `tool_result` messages; `Stop` → the turn's assistant message (from `last_assistant_message`) plus a deterministic turn-end signal. No fragile screen-redraw debouncing.
+- **Lifecycle.** `kill()` (interrupt) sends ESC to cancel the in-flight turn while keeping the session hot; teardown types `/quit` via a new optional `RuntimeDriver.dispose(sessionId)` hook that `runtime.stop()` calls (no-op for the spawn-per-turn drivers). Mid-session process death is recovered by respawning with `--resume <id>` so context is reloaded.
+- **First-run trust dialog handled.** `--dangerously-skip-permissions` does not suppress the interactive "Is this a project you trust?" dialog (only `-p` does); the driver waits for it and accepts the preselected option, matching against ANSI-stripped output (the TUI positions each word with cursor-move escapes).
+- **Security:** `claude-pty` is yolo-only for now (interactive permission prompts are not yet automated). `securityMode: "safe"` is refused with a clear error rather than silently dropping the sandbox.
+- **No native dependency.** The PTY is allocated by a dependency-free inline Python 3 `pty` allocator (stdlib only) — our package ships zero compiled code and needs no build step or node-gyp/ABI-matched prebuild. Requires `python3` on PATH (overridable via `PI_PTY_PYTHON` or the `pythonExecutable` option). A pure-JS PTY is not possible: allocating a real pseudo-terminal requires `openpty`/`ioctl` syscalls that Node's JS surface does not expose. Opt-in debug logging via `CLAUDE_PTY_DEBUG=1`.
+- Live end-to-end smoke `npm run smoke:pty` (skips cleanly when `claude` or `python3` is absent).
+
 ## 1.1.1 - 2026-05-26
 
 ### Fixed — claude-sdk driver env merge (#15)

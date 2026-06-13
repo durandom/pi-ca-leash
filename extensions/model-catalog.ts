@@ -177,6 +177,12 @@ export function resolveRuntimeModelSelection(driver: RuntimeDriverName, model?: 
 }
 
 function catalogForDriver(driver: RuntimeDriverName): RuntimeDriverModelCatalog {
+  if (driver === "claude-pty") {
+    // Drives the real Claude Code TUI — same Anthropic models and
+    // `claude --model <id>` flag as the SDK driver. Reuse that catalog.
+    const base = RUNTIME_MODEL_CATALOGS["claude-sdk"]!;
+    return { ...base, driver };
+  }
   if (driver === "claude-cli") {
     throw new Error(
       "claude-cli driver is no longer supported by the runtime model catalog " +

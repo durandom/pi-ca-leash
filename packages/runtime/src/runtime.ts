@@ -15,6 +15,7 @@ import {
 } from "./persistence.js";
 import { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js";
 import { ClaudeCliDriver } from "./drivers/claude-cli.js";
+import { ClaudePtyDriver } from "./drivers/claude-pty.js";
 import { CodexCliDriver } from "./drivers/codex-cli.js";
 import { PiCodingAgentDriver } from "./drivers/pi-coding-agent.js";
 import { loadPiCaLeashConfigSync } from "./config.js";
@@ -71,9 +72,13 @@ export class ClaudeCodeRuntime {
     const defaultCodexDriver = new CodexCliDriver({
       executable: config.drivers?.["codex-cli"]?.executable,
     });
+    const defaultClaudePtyDriver = new ClaudePtyDriver({
+      executable: config.drivers?.["claude-pty"]?.executable,
+    });
     const defaultPiCodingAgentDriver = new PiCodingAgentDriver();
     this.drivers.set(defaultClaudeDriver.name, defaultClaudeDriver);
     this.drivers.set(defaultClaudeCliDriver.name, defaultClaudeCliDriver);
+    this.drivers.set(defaultClaudePtyDriver.name, defaultClaudePtyDriver);
     this.drivers.set(defaultCodexDriver.name, defaultCodexDriver);
     this.drivers.set(defaultPiCodingAgentDriver.name, defaultPiCodingAgentDriver);
     if (options.drivers) {
@@ -198,10 +203,20 @@ export class ClaudeCodeRuntime {
   }
 
   async stop(sessionId: RuntimeSessionId): Promise<RuntimeStatus> {
-    await this.requireSession(sessionId);
+    const current = await this.requireSession(sessionId);
     const active = this.activeRuns.get(sessionId);
     if (active) {
       active.handle.kill("SIGINT");
+    }
+    // Stateful drivers (e.g. claude-pty's persistent PTY) need an
+    // explicit graceful teardown beyond the per-turn kill signal — the kill
+    // only cancels the in-flight turn, while dispose() releases the long-lived
+    // process (types `/quit` into the TUI). No-op for spawn-per-turn drivers.
+    try {
+      const driver = this.resolveDriver(current.driver);
+      await driver.dispose?.(current.driverSessionId);
+    } catch {
+      // Teardown is best-effort; never block stop() on a driver hiccup.
     }
     const next = await this.patchStatus(sessionId, {
       state: "stopped",
