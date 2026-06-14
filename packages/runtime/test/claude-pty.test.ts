@@ -3,7 +3,14 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, appendFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ClaudePtyDriver, buildPtyArgs, type PtyProcessLike, type PtySpawnFn } from "../src/drivers/claude-pty.js";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  ClaudePtyDriver,
+  buildPtyArgs,
+  PTY_ALLOCATOR,
+  type PtyProcessLike,
+  type PtySpawnFn,
+} from "../src/drivers/claude-pty.js";
 import type { DriverEventEnvelope } from "../src/types.js";
 
 /** Minimal node-pty stand-in that records writes and lets the test drive I/O. */
@@ -323,6 +330,108 @@ test("respawn after the persistent process dies relaunches with --resume", async
   assert.ok(spawnArgs[1]!.includes("--resume"), "respawn reloads via --resume");
   await driver.dispose(sessionId);
 });
+
+test("disposeAll() tears down every live session", async () => {
+  const h1 = await makeHarness("dispose-all-1");
+  const h2 = await makeHarness("dispose-all-2");
+  const turnFake = (hooksPath: string): FakePty => {
+    const f = new FakePty();
+    f.onWrite = async (data) => {
+      if (data === "\r") await appendFile(hooksPath, stopLine("ok"));
+      if (data === "/quit\r") f.exit(0);
+    };
+    return f;
+  };
+  const f1 = turnFake(h1.hooksPath);
+  const f2 = turnFake(h2.hooksPath);
+  const queue = [f1, f2];
+  const driver = new ClaudePtyDriver({
+    ptySpawn: () => queue.shift()!,
+    configDir: h1.configDir,
+    ...FAST,
+  });
+
+  await driver.run(
+    { sessionId: "dispose-all-1", prompt: "a", cwd: h1.root, securityMode: "yolo", sessionStorageDir: h1.sessionStorageDir },
+    () => {},
+  ).done;
+  await driver.run(
+    { sessionId: "dispose-all-2", prompt: "b", cwd: h2.root, securityMode: "yolo", sessionStorageDir: h2.sessionStorageDir },
+    () => {},
+  ).done;
+
+  await driver.disposeAll();
+
+  assert.ok(f1.writes.includes("/quit\r"), "session 1 torn down");
+  assert.ok(f2.writes.includes("/quit\r"), "session 2 torn down");
+});
+
+// ── real Python allocator: parent-death teardown ───────────────────────────
+// These exercise the inline PTY_ALLOCATOR for real (no `claude` needed) to lock
+// in the orphan fix: when the host dies, the pipe to the allocator's stdin
+// closes, and the allocator must reap its child and exit rather than relay on.
+const PY = process.env.PI_PTY_PYTHON ?? "python3";
+const PY_AVAILABLE = (() => {
+  try {
+    return spawnSync(PY, ["--version"]).status === 0;
+  } catch {
+    return false;
+  }
+})();
+
+function spawnAllocator(childArgs: string[]) {
+  // Mirror the driver's production spawn: detached, piped stdio, size in env.
+  return spawn(PY, ["-c", PTY_ALLOCATOR, ...childArgs], {
+    env: { ...process.env, PI_PTY_COLS: "80", PI_PTY_ROWS: "24" },
+    stdio: ["pipe", "pipe", "pipe"],
+    detached: true,
+  });
+}
+
+function awaitAllocatorExit(proc: ReturnType<typeof spawn>, timeoutMs: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      try {
+        if (proc.pid) process.kill(-proc.pid, "SIGKILL");
+      } catch {
+        // already gone
+      }
+      reject(new Error(`allocator did not exit within ${timeoutMs}ms — EOF teardown regressed`));
+    }, timeoutMs);
+    proc.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+test(
+  "allocator reaps its child and exits when stdin closes (host gone)",
+  { skip: PY_AVAILABLE ? false : "python3 not available" },
+  async () => {
+    // Long-lived leaf that dies on the default SIGTERM.
+    const proc = spawnAllocator([PY, "-c", "import time; time.sleep(30)"]);
+    await new Promise((r) => setTimeout(r, 400)); // let pty.fork + exec settle
+    proc.stdin!.end(); // simulate the host dying: our write end closes → EOF
+    await awaitAllocatorExit(proc, 4000);
+  },
+);
+
+test(
+  "allocator escalates to SIGKILL when the child ignores SIGTERM",
+  { skip: PY_AVAILABLE ? false : "python3 not available" },
+  async () => {
+    // Leaf ignores SIGTERM, so only the escalation SIGKILL can end it.
+    const proc = spawnAllocator([
+      PY,
+      "-c",
+      "import signal,time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(30)",
+    ]);
+    await new Promise((r) => setTimeout(r, 500)); // ensure SIG_IGN is installed
+    proc.stdin!.end();
+    await awaitAllocatorExit(proc, 5000); // ~2s TERM grace + KILL + margin
+  },
+);
 
 test("a spawn failure surfaces a structured spawn error (does not throw)", async () => {
   const sessionId = "sess-spawnfail";

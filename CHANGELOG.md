@@ -2,6 +2,14 @@
 
 All notable changes to this repository should be recorded here.
 
+## 1.2.3 - 2026-06-14
+
+### Fixed — `claude-pty` no longer leaks orphaned `claude` processes when the host dies
+
+- The inline Python PTY allocator now tears its child `claude` down and exits when its stdin reaches EOF. A closed stdin means the node host that spawned it is gone (the OS closes the pipe however the host dies — including `SIGKILL` and crashes, where no node code runs). Previously the allocator treated stdin EOF as merely "stop reading input" and kept relaying the PTY forever, leaving a long-lived `claude` (~166MB each) reparented to `launchd`/`init` with no supervisor. Teardown escalates `SIGTERM` → 2s grace → `SIGKILL` so a child that ignores `SIGTERM` is still reaped. This is the guarantee: it needs no cooperation from the dying host.
+- Added a process-level `exit` guard on the node side: if the host process exits (normal return, `process.exit()`, or an unhandled exception) without a graceful `stop()`, every still-live session is signalled `SIGTERM`, which the allocator forwards into `claude`'s separate session (a raw `SIGKILL` to the relay could not be forwarded — `pty.fork()` puts `claude` in its own session via `setsid()` — and would re-orphan it). Installed once per process; multiple driver instances share the one handler.
+- New public `ClaudePtyDriver.disposeAll()` gracefully tears down every live session, for hosts that trap their own signals and want to release sessions before exiting.
+
 ## 1.2.2 - 2026-06-13
 
 ### Fixed — `claude-pty` retries swallowed TUI submits

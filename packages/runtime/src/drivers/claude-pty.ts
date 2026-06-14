@@ -304,7 +304,30 @@ export class ClaudePtyDriver implements RuntimeDriver {
   private readonly opts: typeof DEFAULTS;
   private readonly sessions = new Map<string, PtySession>();
 
+  // ── orphan guard ──────────────────────────────────────────────────────────
+  // Live drivers register here so a single process-level `exit` handler can
+  // tear down every still-running PTY session if the host process goes away
+  // without a graceful stop(). Installed once per process (multiple driver
+  // instances share the one handler — no per-instance listener leak).
+  private static readonly liveDrivers = new Set<ClaudePtyDriver>();
+  private static guardsInstalled = false;
+
+  private static installProcessGuards(): void {
+    if (ClaudePtyDriver.guardsInstalled) return;
+    ClaudePtyDriver.guardsInstalled = true;
+    // `exit` fires on normal return, process.exit(), and an unhandled
+    // exception that terminates the process — i.e. the abnormal cases that
+    // previously leaked sessions. It does NOT fire on an uncatchable SIGKILL,
+    // but that path is already covered by the allocator's stdin-EOF teardown
+    // (the pipe closes regardless of how the host dies). Must be synchronous.
+    process.once("exit", () => {
+      for (const driver of ClaudePtyDriver.liveDrivers) driver.disposeAllSync();
+    });
+  }
+
   constructor(options: ClaudePtyDriverOptions = {}) {
+    ClaudePtyDriver.liveDrivers.add(this);
+    ClaudePtyDriver.installProcessGuards();
     this.injectedPtySpawn = options.ptySpawn;
     this.executable = options.executable ?? process.env.CLAUDE_CLI_EXECUTABLE ?? "claude";
     this.pythonExecutable = options.pythonExecutable ?? process.env.PI_PTY_PYTHON ?? "python3";
@@ -489,6 +512,35 @@ export class ClaudePtyDriver implements RuntimeDriver {
       // already gone
     }
     await this.awaitExit(session, this.opts.killGraceMs);
+  }
+
+  /**
+   * Gracefully tear down every live session (used on host shutdown). Hosts that
+   * trap their own signals should call this before exiting; the synchronous
+   * `exit` guard is only a best-effort backstop for ungraceful exits.
+   */
+  async disposeAll(): Promise<void> {
+    await Promise.all([...this.sessions.keys()].map((id) => this.dispose(id)));
+  }
+
+  /**
+   * Synchronous best-effort teardown for the process `exit` handler (no awaits
+   * allowed there). Sends SIGTERM to each relay: the relay's signal-forwarder
+   * relays it into claude's separate session (a raw SIGKILL here could NOT be
+   * forwarded and would re-orphan claude). The allocator's stdin-EOF path is
+   * the guarantee; this just makes catchable exits tear down promptly.
+   */
+  private disposeAllSync(): void {
+    for (const [sessionId, session] of this.sessions) {
+      this.sessions.delete(sessionId);
+      if (session.exited || session.disposed) continue;
+      session.disposed = true;
+      try {
+        session.proc.kill("SIGTERM");
+      } catch {
+        // already gone
+      }
+    }
   }
 
   private async awaitExit(session: PtySession, timeoutMs: number): Promise<boolean> {
@@ -726,13 +778,41 @@ export class ClaudePtyDriver implements RuntimeDriver {
 // Inline Python pty allocator. Reads window size from PI_PTY_COLS/PI_PTY_ROWS,
 // forks a pty, execs argv[1:], and relays stdin<->master<->stdout until the
 // child exits, propagating its exit code. Kept dependency-free (stdlib only).
-const PTY_ALLOCATOR = [
-  "import os,pty,sys,fcntl,termios,struct,select,signal",
+//
+// Orphan safety: `pty.fork()` runs `setsid()` in the child, so the execed
+// `claude` is its OWN session/process-group leader — NOT reachable via the
+// node-spawned relay's process group. The node host therefore signals the
+// relay, which forwards (see `forward`). The critical case is the host dying
+// abruptly (SIGKILL/crash) where no node code runs: the OS then closes the
+// pipe feeding our stdin, so a read of fd 0 returns EOF. We treat that EOF as
+// "parent gone" and tear the child down (`reap`, TERM→KILL) instead of relaying
+// on forever — that is what stops orphaned `claude` processes squatting under
+// launchd. Normal child exit is unchanged: the master fd returns EOF first and
+// we break with the real exit status preserved.
+export const PTY_ALLOCATOR = [
+  "import os,pty,sys,fcntl,termios,struct,select,signal,time",
   'cols=int(os.environ.get("PI_PTY_COLS","120"));rows=int(os.environ.get("PI_PTY_ROWS","40"))',
   "argv=sys.argv[1:]",
   "pid,fd=pty.fork()",
   "if pid==0:",
   "    os.execvp(argv[0],argv);os._exit(127)",
+  "def reap():",
+  "    # Escalate TERM->KILL so the child never outlives us as an orphan.",
+  "    try:",
+  "        os.kill(pid,signal.SIGTERM)",
+  "    except ProcessLookupError:",
+  "        return",
+  "    for _ in range(40):",
+  "        try:",
+  "            w,_=os.waitpid(pid,os.WNOHANG)",
+  "        except OSError:",
+  "            return",
+  "        if w: return",
+  "        time.sleep(0.05)",
+  "    try:",
+  "        os.kill(pid,signal.SIGKILL)",
+  "    except ProcessLookupError:",
+  "        pass",
   "def forward(sig,frame):",
   "    try:",
   "        os.kill(pid,sig)",
@@ -769,7 +849,9 @@ const PTY_ALLOCATOR = [
   "            data=os.read(0,65536)",
   "        except OSError:",
   "            data=b''",
-  "        if not data: so=False",
+  "        if not data:",
+  "            reap()",
+  "            break",
   "        else:",
   "            try:",
   "                os.write(fd,data)",
