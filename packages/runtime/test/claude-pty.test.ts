@@ -129,6 +129,91 @@ test("interactive turn: types prompt, emits hook tool + assistant, ends on Stop"
   await driver.dispose(sessionId);
 });
 
+test("interactive turn stays alive while activity streams past turnTimeoutMs (idle reset, not wall-clock)", async () => {
+  const sessionId = "sess-idle-reset";
+  const h = await makeHarness(sessionId);
+  const fake = new FakePty();
+  const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+  // turnTimeoutMs is short, but we stream a tool line well inside each window
+  // for a TOTAL duration that exceeds it several times over. A fixed wall-clock
+  // deadline would kill the turn mid-stream; the idle reset must keep it alive
+  // until the Stop hook arrives.
+  const TURN = 200;
+  fake.onWrite = async (data) => {
+    if (data === "\r") {
+      void (async () => {
+        for (let i = 0; i < 6; i++) {
+          await appendFile(h.hooksPath, toolLine("Read", { file_path: `/x${i}` }, { is_error: false }));
+          await sleep(TURN / 2); // 100ms < 200ms window → resets the deadline in time
+        }
+        // ~600ms of active work (3× turnTimeoutMs) elapsed before the turn ends.
+        await appendFile(h.hooksPath, stopLine("done after a long active turn"));
+      })();
+    }
+    if (data === "/quit\r") fake.exit(0);
+  };
+
+  const driver = new ClaudePtyDriver({
+    ptySpawn: () => fake,
+    configDir: h.configDir,
+    ...FAST,
+    turnTimeoutMs: TURN,
+  });
+
+  const events: DriverEventEnvelope[] = [];
+  const handle = driver.run(
+    { sessionId, prompt: "hello", cwd: h.root, securityMode: "yolo", sessionStorageDir: h.sessionStorageDir },
+    (e) => {
+      events.push(e);
+    },
+  );
+  const result = await handle.done;
+
+  assert.equal(result.code, 0, "active turn completed on Stop, not killed by the timeout");
+  assert.ok(
+    !events.some((e) => e.type === "error" && e.payload.code === "CLAUDE_PTY_TURN_TIMEOUT"),
+    "no turn-timeout error fired while activity streamed",
+  );
+  await driver.dispose(sessionId);
+});
+
+test("interactive turn times out after turnTimeoutMs of total silence (genuine wedge)", async () => {
+  const sessionId = "sess-silent-wedge";
+  const h = await makeHarness(sessionId);
+  const fake = new FakePty();
+
+  // The submit lands but the agent never emits a single hook line → genuine
+  // wedge. The inactivity deadline must fire.
+  fake.onWrite = async (data) => {
+    if (data === "/quit\r") fake.exit(0);
+    // intentionally emit nothing on "\r"
+  };
+
+  const driver = new ClaudePtyDriver({
+    ptySpawn: () => fake,
+    configDir: h.configDir,
+    ...FAST,
+    turnTimeoutMs: 120,
+  });
+
+  const events: DriverEventEnvelope[] = [];
+  const handle = driver.run(
+    { sessionId, prompt: "hello", cwd: h.root, securityMode: "yolo", sessionStorageDir: h.sessionStorageDir },
+    (e) => {
+      events.push(e);
+    },
+  );
+  const result = await handle.done;
+
+  assert.equal(result.code, 1, "silent turn timed out");
+  assert.ok(
+    events.some((e) => e.type === "error" && e.payload.code === "CLAUDE_PTY_TURN_TIMEOUT"),
+    "turn-timeout error emitted on total silence",
+  );
+  await driver.dispose(sessionId);
+});
+
 test("interactive turn retries Enter when the prompt remains visible", async () => {
   const sessionId = "sess-submit-retry";
   const h = await makeHarness(sessionId);

@@ -2,6 +2,14 @@
 
 All notable changes to this repository should be recorded here.
 
+## 1.2.4 - 2026-06-16
+
+### Fixed — `claude-pty` turn timeout is now idle-based, not a wall-clock cap
+
+- The per-turn timeout (`turnTimeoutMs`) was a fixed deadline computed once at turn start and never extended, so a long but *actively working* turn (streaming `tool_use`/`tool_result` hook lines throughout) was killed the moment it crossed the ceiling — a false "wedge" verdict on productive work (`claude-pty turn timed out after Nms with no Stop hook`). The driver already had an activity-aware staleness watchdog upstream; this inner cap quietly overrode it.
+- The deadline is now an **inactivity** ceiling: every streamed hook line resets it, so the timeout only fires after `turnTimeoutMs` of *total silence* — a genuine wedge. `pumpHooks` returns `sawActivity` and the turn loop resets the deadline on each active poll. Error message now reads `claude-pty turn idle for Nms with no driver activity`.
+- Default raised 10 → 15 min, ~9× margin over the largest silent gap seen in productive runs (~65 s of model thinking between tool calls). Added two regression tests: an active turn survives well past `turnTimeoutMs`; a fully silent turn still times out.
+
 ## 1.2.3 - 2026-06-14
 
 ### Fixed — `claude-pty` no longer leaks orphaned `claude` processes when the host dies

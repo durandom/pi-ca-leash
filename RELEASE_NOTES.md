@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### claude-pty turn timeout is now idle-based, not a wall-clock cap
+
+The claude-pty driver's per-turn timeout (`turnTimeoutMs`) used to be a fixed
+wall-clock deadline computed once at turn start and never extended. A long but
+*actively working* turn — one streaming `tool_use`/`tool_result` hook lines the
+whole time — was killed the moment it crossed the ceiling, even though it was
+plainly not wedged (`claude-pty turn timed out after Nms with no Stop hook`).
+That defeated the purpose of having a separate, activity-aware staleness
+watchdog upstream.
+
+The deadline is now an **inactivity** ceiling: every streamed hook line pushes
+it back, so the timeout only fires after `turnTimeoutMs` of *total silence* —
+a genuine wedge. The default rises from 10 → 15 min, giving ~9× margin over the
+largest silent gap observed in productive runs (~65 s of model thinking between
+tool calls). The error message and code are unchanged in spirit but now read
+`claude-pty turn idle for Nms with no driver activity`.
+
 ### `securityMode` — simpler, honest sandbox surface
 
 We collapsed the old five-value `permissionMode` field into two coarse modes that map onto each driver's *native* sandbox/approval flag. pi-ca-leash does **not** layer additional tool filtering on top — what each mode actually buys you depends entirely on the driver. The table below is the contract.

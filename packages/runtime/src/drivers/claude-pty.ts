@@ -170,7 +170,13 @@ const DEFAULTS = {
   submitDelayMs: 40,
   submitRetryDelayMs: 1_000,
   pollIntervalMs: 120,
-  turnTimeoutMs: 10 * 60_000,
+  // Idle (inactivity) ceiling for a turn, NOT a wall-clock cap: the turn loop
+  // resets this deadline every time a hook line streams (tool_use/tool_result),
+  // so a long-but-active turn is never killed. It only fires after this many ms
+  // with no driver activity at all — i.e. a genuine wedge. 15 min gives ~9× margin
+  // over the largest silent gap observed in productive runs (~65 s of model
+  // thinking between tool calls).
+  turnTimeoutMs: 15 * 60_000,
   quitGraceMs: 3_000,
   killGraceMs: 750,
 };
@@ -420,8 +426,10 @@ export class ClaudePtyDriver implements RuntimeDriver {
       let submitRetried = false;
 
       // Wait for the turn to end: a Stop hook line. PostToolUse lines stream
-      // tool_use/tool_result messages in the meantime.
-      const deadline = Date.now() + this.opts.turnTimeoutMs;
+      // tool_use/tool_result messages in the meantime. `deadline` is an INACTIVITY
+      // ceiling, not a wall-clock cap — every streamed hook line below pushes it
+      // back, so a long-but-active turn never trips it; only true silence does.
+      let deadline = Date.now() + this.opts.turnTimeoutMs;
       while (true) {
         if (turnAborted) {
           await this.pumpHooks(session, onEvent);
@@ -440,9 +448,15 @@ export class ClaudePtyDriver implements RuntimeDriver {
           });
           return { code: session.exitCode ?? 1, signal: null };
         }
-        const { turnEnded } = await this.pumpHooks(session, onEvent);
+        const { turnEnded, sawActivity } = await this.pumpHooks(session, onEvent);
         if (turnEnded) {
           return { code: 0, signal: null };
+        }
+        // Activity this poll → push the inactivity deadline back. Keeps an
+        // actively-working turn (streaming tool calls) alive indefinitely; the
+        // timeout below only fires after a full `turnTimeoutMs` of silence.
+        if (sawActivity) {
+          deadline = Date.now() + this.opts.turnTimeoutMs;
         }
         if (
           !submitRetried &&
@@ -457,7 +471,7 @@ export class ClaudePtyDriver implements RuntimeDriver {
           await onEvent({
             type: "error",
             payload: {
-              message: `claude-pty turn timed out after ${this.opts.turnTimeoutMs}ms with no Stop hook`,
+              message: `claude-pty turn idle for ${this.opts.turnTimeoutMs}ms with no driver activity (no hook line, no Stop hook)`,
               code: "CLAUDE_PTY_TURN_TIMEOUT",
             },
           });
@@ -679,8 +693,11 @@ export class ClaudePtyDriver implements RuntimeDriver {
   private async pumpHooks(
     session: PtySession,
     onEvent: (event: DriverEventEnvelope) => Promise<void> | void,
-  ): Promise<{ turnEnded: boolean }> {
+  ): Promise<{ turnEnded: boolean; sawActivity: boolean }> {
     const lines = this.readHookLines(session);
+    // Any new hook line means the agent is still working this turn — used by the
+    // turn loop to reset the inactivity deadline (idle timeout, not wall-clock).
+    const sawActivity = lines.length > 0;
     let turnEnded = false;
     for (const line of lines) {
       let parsed: unknown;
@@ -695,7 +712,7 @@ export class ClaudePtyDriver implements RuntimeDriver {
       }
       if (ended) turnEnded = true;
     }
-    return { turnEnded };
+    return { turnEnded, sawActivity };
   }
 
   /** Advance past hook lines already written (without emitting them). */
