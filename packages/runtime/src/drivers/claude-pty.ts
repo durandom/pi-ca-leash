@@ -101,7 +101,7 @@ export interface ClaudePtyDriverOptions {
   submitRetryDelayMs?: number;
   /** Poll cadence for the hook-payload file. */
   pollIntervalMs?: number;
-  /** Hard cap for a single turn before giving up. */
+  /** Inactivity ceiling for a single turn before giving up. */
   turnTimeoutMs?: number;
   /** How long dispose() waits for `/quit` to close the TUI before TERM. */
   quitGraceMs?: number;
