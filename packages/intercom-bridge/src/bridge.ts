@@ -63,11 +63,11 @@ export function defaultStaleThresholdMsForDriver(driver: RuntimeDriverName): num
   }
 }
 
-const BRIDGE_SYSTEM_PROMPT = [
-  "You are a long-lived Claude worker reached through intercom-style messages.",
-  "Treat new messages as continuation of same session, not fresh bootstrap.",
-  "For asks and replies, answer concisely and directly.",
-  "When you finish handling one inbound message, end in a clean idle state.",
+export const BRIDGE_SYSTEM_PROMPT = [
+  "You are a long-lived runtime-backed coding agent peer reached through intercom-style messages.",
+  "Treat new inbound messages as continuation of the same peer session.",
+  "Answer ask and reply messages concisely and directly.",
+  "When one inbound message is handled, return to an idle state.",
 ].join(" ");
 
 export class ClaudeRuntimeIntercomBridge {
@@ -103,7 +103,7 @@ export class ClaudeRuntimeIntercomBridge {
       cwd: input.cwd,
       model: input.model,
       name: input.name,
-      appendSystemPrompt: mergeSystemPrompt(input.appendSystemPrompt),
+      appendSystemPrompt: mergeSystemPrompt(input.appendSystemPrompt, input.includeBridgeSystemPrompt ?? true),
       permissionMode: input.permissionMode,
       securityMode: input.securityMode,
       tools: input.tools,
@@ -727,7 +727,10 @@ export class ClaudeRuntimeIntercomBridge {
   }
 }
 
-function mergeSystemPrompt(appendSystemPrompt?: string): string {
+function mergeSystemPrompt(appendSystemPrompt?: string, includeBridgeSystemPrompt = true): string | undefined {
+  if (!includeBridgeSystemPrompt) {
+    return appendSystemPrompt;
+  }
   return appendSystemPrompt ? `${appendSystemPrompt}\n\n${BRIDGE_SYSTEM_PROMPT}` : BRIDGE_SYSTEM_PROMPT;
 }
 
@@ -828,4 +831,4 @@ function formatTransportInboundText(message: BridgeTransportIncomingMessage): st
   return attachmentText ? `${message.text}\n\n${attachmentText}` : message.text;
 }
 
-export { BRIDGE_SYSTEM_PROMPT, extractLatestReplyText, extractReplyText, formatInboundMessage, formatTransportInboundText, mapRuntimeState };
+export { extractLatestReplyText, extractReplyText, formatInboundMessage, formatTransportInboundText, mapRuntimeState };

@@ -69,7 +69,7 @@ Important consequence:
 - the bridge still works locally without live broker presence
 - peers may now be runtime-backed by different drivers
 - extension startup can choose the default peer driver via config files or `PI_CLAUDE_RUNTIME_DRIVER`
-- downstream extensions can use `PiCaLeashManagedPeerApi` from `@pi-claude-code-agent/intercom-bridge` instead of wrapping public `/peer` tools
+- downstream extensions can use `PiCaLeashManagedPeerApi` from `@pi-claude-code-agent/intercom-bridge` instead of wrapping public `/peer` tools; managed launches share lifecycle and dashboard state, but do not inject the `/peer` intercom behavior prompt unless `includeBridgeSystemPrompt: true` is passed
 - public peer examples stay driver-agnostic; experimental Codex selection is primarily via startup default or LLM-callable tools
 
 ### 3. Subagent backend layer

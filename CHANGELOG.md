@@ -2,6 +2,13 @@
 
 All notable changes to this repository should be recorded here.
 
+## 1.3.0 - 2026-06-17
+
+### Fixed — managed peer launches no longer inherit `/peer` intercom persona text by default
+
+- `PiCaLeashManagedPeerApi.launchPeer()` now defaults `includeBridgeSystemPrompt` to `false`, so downstream orchestrators using the managed API as a runtime lifecycle/dashboard substrate do not silently prepend the bridge's intercom behavior prompt to domain-specific agents. Direct `ClaudeRuntimeIntercomBridge.launchPeer()` calls still default to the intercom prompt for normal `/peer` workers, and managed callers can opt back in with `includeBridgeSystemPrompt: true`.
+- The built-in bridge system prompt is now driver-neutral (`runtime-backed coding agent peer`) instead of Claude-specific, which avoids misleading Codex/pi-coding-agent sessions.
+
 ## 1.2.4 - 2026-06-16
 
 ### Fixed — `claude-pty` turn timeout is now idle-based, not a wall-clock cap

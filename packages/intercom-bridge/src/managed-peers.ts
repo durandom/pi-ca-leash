@@ -70,6 +70,7 @@ export class PiCaLeashManagedPeerApi {
     return this.bridge.launchPeer({
       ...input,
       kind: input.kind ?? "managed",
+      includeBridgeSystemPrompt: input.includeBridgeSystemPrompt ?? false,
     });
   }
 

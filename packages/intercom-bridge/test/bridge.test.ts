@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { DriverEventEnvelope, RuntimeDriver, RuntimeDriverRunHandle, RuntimeDriverRunInput } from "@pi-claude-code-agent/runtime";
 import {
   ClaudeRuntimeIntercomBridge,
+  BRIDGE_SYSTEM_PROMPT,
   PiCaLeashManagedPeerApi,
   WaitCompletionError,
   defaultStaleThresholdMsForDriver,
@@ -790,6 +791,44 @@ test("launchPeer omits thinkingLevel when caller does not supply one", async () 
   await bridge.launchPeer({ name: "worker", prompt: "boot", driver: "claude-sdk" });
 
   assert.equal(driver.runs[0]?.thinkingLevel, undefined);
+});
+
+test("bridge launchPeer includes intercom system prompt by default", async () => {
+  const storageDir = await mkdtemp(join(tmpdir(), "claude-intercom-bridge-test-"));
+  const driver = new FakeDriver();
+  const bridge = new ClaudeRuntimeIntercomBridge({
+    runtimeOptions: { storageDir: join(storageDir, "runtime"), driver },
+    storageDir: join(storageDir, "bridge"),
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  await bridge.launchPeer({
+    name: "worker",
+    prompt: "boot",
+    appendSystemPrompt: "ROLE",
+  });
+
+  assert.equal(driver.runs[0]?.appendSystemPrompt, `ROLE\n\n${BRIDGE_SYSTEM_PROMPT}`);
+});
+
+test("PiCaLeashManagedPeerApi launchPeer does not inject intercom system prompt by default", async () => {
+  const cwd = await mkdtemp(join(tmpdir(), "pi-ca-leash-managed-peer-api-"));
+  const driver = new FakeDriver();
+  const api = new PiCaLeashManagedPeerApi({
+    cwd,
+    runtimeOptions: { driver },
+    pollIntervalMs: 5,
+    askTimeoutMs: 2_000,
+  });
+
+  await api.launchPeer({
+    name: "worker",
+    prompt: "boot",
+    appendSystemPrompt: "SPELLKAVE ROLE",
+  });
+
+  assert.equal(driver.runs[0]?.appendSystemPrompt, "SPELLKAVE ROLE");
 });
 
 test("deliver forwards driver passthrough fields verbatim to runtime.send (regression: #8, #9)", async () => {

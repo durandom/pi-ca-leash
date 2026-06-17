@@ -274,7 +274,7 @@ If another extension wants workers that behave like normal `pi-ca-leash` peers, 
 - `piCaLeashRuntimeStorageDir(...)`
 - `piCaLeashBridgeStorageDir(...)`
 
-That API gives downstream orchestrators the normal peer lifecycle (`launch`, `attach`, `list`, `status`, `send`, `ask`, `interrupt`, `stop`, `reconcile`) while writing to the same `.pi-ca-leash/{runtime,bridge}` state used by the extension.
+That API gives downstream orchestrators the normal peer lifecycle (`launch`, `attach`, `list`, `status`, `send`, `ask`, `interrupt`, `stop`, `reconcile`) while writing to the same `.pi-ca-leash/{runtime,bridge}` state used by the extension. Managed API launches do not inject the `/peer` intercom behavior prompt by default; pass `includeBridgeSystemPrompt: true` only when the managed worker should behave like a live intercom peer.
 
 Result: managed peers created by another extension can show up in the live `/peer dashboard` and `peer_list` without requiring a pi restart. The normal dashboard shows a compact `managed:owner` badge, and the advanced dashboard expands full managed-peer metadata.
 

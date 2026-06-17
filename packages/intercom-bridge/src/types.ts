@@ -60,6 +60,13 @@ export interface LaunchPeerInput {
   cwd?: string;
   model?: string;
   appendSystemPrompt?: string;
+  /**
+   * Add the bridge's intercom peer behavior prompt at launch. Direct bridge
+   * launches default to true because they are normally `/peer` workers.
+   * `PiCaLeashManagedPeerApi` defaults this to false so downstream orchestrators
+   * can use the shared peer lifecycle without inheriting intercom role text.
+   */
+  includeBridgeSystemPrompt?: boolean;
   /** @deprecated Use `securityMode`. */
   permissionMode?: StartSessionInput["permissionMode"];
   /**
