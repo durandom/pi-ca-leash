@@ -41,6 +41,7 @@ Current drivers:
 - `claude-cli` shells out to local `claude -p --output-format stream-json` and avoids importing `@anthropic-ai/claude-agent-sdk`.
 - `codex-cli` exists as an experimental runtime driver with a narrower supported option set.
 - `pi-coding-agent` wraps `@earendil-works/pi-coding-agent`'s `createAgentSession`, mapping `AgentSessionEvent` into the normalized driver stream. See `docs/pi-coding-agent-event-mapping.md`. No resume support yet — each `driver.run()` creates a fresh `AgentSession`.
+- `agy` runs the Google Antigravity CLI (`agy`) in print mode via piped stdin, tracks the dynamic session ID from execution logs, and supports session resumes.
 
 Token usage reporting:
 - runtime usage values are attached to individual `result` events and are not accumulated into session totals by runtime, bridge, subagent, teams, or dashboard code

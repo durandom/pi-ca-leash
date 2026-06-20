@@ -14,6 +14,8 @@ test("parseRuntimeDriverName accepts supported names and rejects others", () => 
   assert.equal(parseRuntimeDriverName("claude-sdk"), "claude-sdk");
   assert.equal(parseRuntimeDriverName("claude-cli"), "claude-cli");
   assert.equal(parseRuntimeDriverName("codex-cli"), "codex-cli");
+  assert.equal(parseRuntimeDriverName("pi-coding-agent"), "pi-coding-agent");
+  assert.equal(parseRuntimeDriverName("agy"), "agy");
   assert.equal(parseRuntimeDriverName(" codex-cli "), "codex-cli");
   assert.equal(parseRuntimeDriverName("wat"), undefined);
   assert.equal(parseRuntimeDriverName(undefined), undefined);
@@ -23,6 +25,8 @@ test("resolveRuntimeDriverFromEnv returns parsed runtime driver or undefined", (
   assert.equal(resolveRuntimeDriverFromEnv({ [RUNTIME_DRIVER_ENV]: "codex-cli" }), "codex-cli");
   assert.equal(resolveRuntimeDriverFromEnv({ [RUNTIME_DRIVER_ENV]: "claude-sdk" }), "claude-sdk");
   assert.equal(resolveRuntimeDriverFromEnv({ [RUNTIME_DRIVER_ENV]: "claude-cli" }), "claude-cli");
+  assert.equal(resolveRuntimeDriverFromEnv({ [RUNTIME_DRIVER_ENV]: "pi-coding-agent" }), "pi-coding-agent");
+  assert.equal(resolveRuntimeDriverFromEnv({ [RUNTIME_DRIVER_ENV]: "agy" }), "agy");
   assert.equal(resolveRuntimeDriverFromEnv({ [RUNTIME_DRIVER_ENV]: "wat" }), undefined);
   assert.equal(resolveRuntimeDriverFromEnv({}), undefined);
 });

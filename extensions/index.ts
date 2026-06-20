@@ -79,8 +79,8 @@ const EXTENSION_VERSION = String((extensionRequire("../package.json") as { versi
 const STATE_DIR_NAME = ".pi-ca-leash";
 const BACKGROUND_POLL_INTERVAL_MS = 5_000;
 const BACKGROUND_REFRESH_MIN_INTERVAL_MS = 3_000;
-const RUNTIME_DRIVER_ENUM = ["claude-sdk", "claude-cli", "claude-pty", "codex-cli", "pi-coding-agent"] as const;
-const RUNTIME_DRIVER_USAGE = "claude-sdk, claude-cli, claude-pty, codex-cli, or pi-coding-agent";
+const RUNTIME_DRIVER_ENUM = ["claude-sdk", "claude-cli", "claude-pty", "codex-cli", "pi-coding-agent", "agy"] as const;
+const RUNTIME_DRIVER_USAGE = "claude-sdk, claude-cli, claude-pty, codex-cli, pi-coding-agent, or agy";
 const DEFAULT_SNOOZE_MINUTES = 15;
 
 interface DashboardSnapshot {
@@ -1920,7 +1920,7 @@ export default async function piCaLeashExtension(pi: ExtensionAPI) {
         `/${command} ask <name> | <message>`,
         `/${command} send <name> | <message>`,
         `/${command} list`,
-        `/${command} models [claude-sdk|claude-cli|claude-pty|codex-cli|pi-coding-agent] [all|advanced|verbose]`,
+        `/${command} models [claude-sdk|claude-cli|claude-pty|codex-cli|pi-coding-agent|agy] [all|advanced|verbose]`,
         `/${command} history <name> [cursor] [limit]`,
         `/${command} interrupt <name>`,
         `/${command} stop <name>`,
@@ -3018,7 +3018,7 @@ function parsePeerModelsArgs(args: string): { driver?: (typeof RUNTIME_DRIVER_EN
       verbose = true;
       continue;
     }
-    throw new Error("usage: /peer models [claude-sdk|claude-cli|claude-pty|codex-cli|pi-coding-agent] [all|advanced|verbose]");
+    throw new Error("usage: /peer models [claude-sdk|claude-cli|claude-pty|codex-cli|pi-coding-agent|agy] [all|advanced|verbose]");
   }
   return { driver, verbose };
 }
@@ -3215,6 +3215,8 @@ function compactDriver(driver: string): string {
       return "codex";
     case "pi-coding-agent":
       return "pi-ca";
+    case "agy":
+      return "agy";
     default:
       return driver.length > 7 ? `${driver.slice(0, 6)}…` : driver;
   }

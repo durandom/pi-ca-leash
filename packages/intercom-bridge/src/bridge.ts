@@ -59,6 +59,7 @@ export function defaultStaleThresholdMsForDriver(driver: RuntimeDriverName): num
       return 2 * 60_000;
     case "codex-cli":
     case "pi-coding-agent":
+    case "agy":
       return 5 * 60_000;
   }
 }

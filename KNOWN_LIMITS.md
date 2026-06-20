@@ -24,9 +24,9 @@ This file is intentionally blunt.
    - Better an explicit error than a fake branch illusion.
 
 5. **Runtime driver support is mixed.**
-   - Runtime now has three drivers: `claude-sdk`, `claude-cli`, and `codex-cli`.
-   - Runtime has an experimental `codex-cli` driver.
-   - Bridge peers can carry driver identity, including `driver: "claude-cli"` or `driver: "codex-cli"`.
+   - Runtime now has five drivers: `claude-sdk`, `claude-cli`, `claude-pty`, `codex-cli`, `pi-coding-agent`, and `agy`.
+   - Runtime has experimental `codex-cli` and `agy` drivers.
+   - Bridge peers can carry driver identity, including `driver: "claude-cli"`, `driver: "codex-cli"`, or `driver: "agy"`.
    - Extension startup can select `claude-cli` or Codex as the default driver for new peers via config files or `PI_CLAUDE_RUNTIME_DRIVER`.
    - Per-peer driver override exists on the LLM-callable `peer_start` tool.
    - Public `/peer start` slash-command docs can thread driver and model selection, but treat Codex selection as experimental.

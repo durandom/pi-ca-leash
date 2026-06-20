@@ -13,7 +13,7 @@ test("parsePeerStartCommandInput supports old and driver-aware forms", () => {
 });
 
 test("parsePeerStartCommandInput rejects invalid driver or too many fields", () => {
-  assert.throws(() => parsePeerStartCommandInput("reviewer | Review auth flow | wat"), /driver must be claude-sdk, claude-cli, claude-pty, codex-cli, or pi-coding-agent/);
+  assert.throws(() => parsePeerStartCommandInput("reviewer | Review auth flow | wat"), /driver must be claude-sdk, claude-cli, claude-pty, codex-cli, pi-coding-agent, or agy/);
   assert.throws(() => parsePeerStartCommandInput("a | b | c | d | e"), /usage: <prompt> \| \[driver\] \| \[model\] OR <name> \| <prompt> \| \[driver\] \| \[model\]/);
 });
 
@@ -24,7 +24,7 @@ test("parseSubagentRunCommandInput supports plain task and driver prefix", () =>
 });
 
 test("parseSubagentRunCommandInput rejects invalid driver in piped form", () => {
-  assert.throws(() => parseSubagentRunCommandInput("wat | do work"), /driver must be claude-sdk, claude-cli, claude-pty, codex-cli, or pi-coding-agent/);
+  assert.throws(() => parseSubagentRunCommandInput("wat | do work"), /driver must be claude-sdk, claude-cli, claude-pty, codex-cli, pi-coding-agent, or agy/);
 });
 
 test("parseTeamSpawnCommandInput supports old and new forms", () => {
@@ -33,6 +33,6 @@ test("parseTeamSpawnCommandInput supports old and new forms", () => {
 });
 
 test("parseTeamSpawnCommandInput rejects invalid driver or too many fields", () => {
-  assert.throws(() => parseTeamSpawnCommandInput("worker | hello | wat"), /driver must be claude-sdk, claude-cli, claude-pty, codex-cli, or pi-coding-agent/);
+  assert.throws(() => parseTeamSpawnCommandInput("worker | hello | wat"), /driver must be claude-sdk, claude-cli, claude-pty, codex-cli, pi-coding-agent, or agy/);
   assert.throws(() => parseTeamSpawnCommandInput("worker | hello | codex-cli | extra"), /usage: <name> \| <prompt> \| \[driver\]/);
 });

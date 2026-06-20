@@ -2,6 +2,15 @@
 
 All notable changes to this repository should be recorded here.
 
+## 1.4.0 - 2026-06-20
+
+### Added — Google Antigravity CLI (agy) runtime driver
+
+- Added a new `agy` driver that wraps the Google Antigravity CLI (`agy`) in print mode.
+- Supports piped prompt input, dynamic session ID extraction from logs, and session resumes via `--conversation`.
+- Maps the effective security mode to `--sandbox` (`safe`) or `--dangerously-skip-permissions` (`yolo`).
+- Configures a static Gemini model catalog (`gemini-3.5-flash` and `gemini-3.5-pro`) for the `agy` driver.
+
 ## 1.3.0 - 2026-06-17
 
 ### Fixed — managed peer launches no longer inherit `/peer` intercom persona text by default

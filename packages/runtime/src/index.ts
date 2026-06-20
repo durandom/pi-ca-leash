@@ -10,6 +10,7 @@ export { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js"
 export { ClaudeCliDriver, buildClaudeCliCommand } from "./drivers/claude-cli.js";
 export { ClaudePtyDriver, buildPtyArgs, type ClaudePtyDriverOptions, type PtyProcessLike, type PtySpawnFn } from "./drivers/claude-pty.js";
 export { CodexCliDriver, parseCodexCliEvent, buildCodexCliCommand } from "./drivers/codex-cli.js";
+export { AgyCliDriver, buildAgyCliCommand } from "./drivers/agy-cli.js";
 export {
   PiCodingAgentDriver,
   parsePiCodingAgentEvent,

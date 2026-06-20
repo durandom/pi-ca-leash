@@ -114,6 +114,26 @@ export const RUNTIME_MODEL_CATALOGS: Record<string, RuntimeDriverModelCatalog> =
       { id: "gpt-5.5", name: "GPT-5.5", contextWindow: 272000, maxTokens: 128000, reasoning: true, inputModalities: ["text", "image"], inputCostPerMillion: 5, outputCostPerMillion: 30 },
     ],
   },
+  "agy": {
+    driver: "agy",
+    provider: "google-gemini",
+    defaultModel: "gemini-3.5-flash",
+    aliases: {
+      flash: "gemini-3.5-flash",
+      pro: "gemini-3.5-pro",
+    },
+    recommendations: [
+      { alias: "flash", model: "gemini-3.5-flash", useCase: "fast iteration, cheap coding assistant" },
+      { alias: "pro", model: "gemini-3.5-pro", useCase: "complex architecture and multi-file debugging" },
+    ],
+    cli: "agy",
+    flag: "agy --model <id>",
+    source: "lanista agents google",
+    models: [
+      { id: "gemini-3.5-flash", name: "Gemini 3.5 Flash", contextWindow: 1000000, maxTokens: 8192, reasoning: false, inputModalities: ["text", "image"], inputCostPerMillion: 0.075, outputCostPerMillion: 0.3 },
+      { id: "gemini-3.5-pro", name: "Gemini 3.5 Pro", contextWindow: 2000000, maxTokens: 8192, reasoning: false, inputModalities: ["text", "image"], inputCostPerMillion: 1.25, outputCostPerMillion: 5.0 },
+    ],
+  },
 };
 
 export function modelCatalogsForDriver(driver?: RuntimeDriverName): RuntimeDriverModelCatalog[] {
@@ -128,6 +148,7 @@ export function modelCatalogsForDriver(driver?: RuntimeDriverName): RuntimeDrive
     catalogForDriver("claude-sdk"),
     catalogForDriver("codex-cli"),
     catalogForDriver("pi-coding-agent"),
+    catalogForDriver("agy"),
   ];
 }
 

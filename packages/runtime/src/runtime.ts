@@ -17,6 +17,7 @@ import { ClaudeSdkDriver, parseClaudeSdkMessage } from "./drivers/claude-sdk.js"
 import { ClaudeCliDriver } from "./drivers/claude-cli.js";
 import { ClaudePtyDriver } from "./drivers/claude-pty.js";
 import { CodexCliDriver } from "./drivers/codex-cli.js";
+import { AgyCliDriver } from "./drivers/agy-cli.js";
 import { PiCodingAgentDriver } from "./drivers/pi-coding-agent.js";
 import { loadPiCaLeashConfigSync } from "./config.js";
 import { resolveSecurityMode } from "./security-mode.js";
@@ -76,11 +77,15 @@ export class ClaudeCodeRuntime {
       executable: config.drivers?.["claude-pty"]?.executable,
     });
     const defaultPiCodingAgentDriver = new PiCodingAgentDriver();
+    const defaultAgyDriver = new AgyCliDriver({
+      executable: config.drivers?.["agy"]?.executable,
+    });
     this.drivers.set(defaultClaudeDriver.name, defaultClaudeDriver);
     this.drivers.set(defaultClaudeCliDriver.name, defaultClaudeCliDriver);
     this.drivers.set(defaultClaudePtyDriver.name, defaultClaudePtyDriver);
     this.drivers.set(defaultCodexDriver.name, defaultCodexDriver);
     this.drivers.set(defaultPiCodingAgentDriver.name, defaultPiCodingAgentDriver);
+    this.drivers.set(defaultAgyDriver.name, defaultAgyDriver);
     if (options.drivers) {
       for (const driver of Object.values(options.drivers)) {
         if (driver) {

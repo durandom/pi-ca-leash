@@ -6,7 +6,8 @@ export type RuntimeDriverName =
   | "claude-cli"
   | "claude-pty"
   | "codex-cli"
-  | "pi-coding-agent";
+  | "pi-coding-agent"
+  | "agy";
 
 export type RuntimeSessionState =
   | "starting"

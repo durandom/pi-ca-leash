@@ -11,7 +11,8 @@ export function parseRuntimeDriverName(value: unknown): RuntimeDriverName | unde
     trimmed === "claude-cli" ||
     trimmed === "claude-pty" ||
     trimmed === "codex-cli" ||
-    trimmed === "pi-coding-agent"
+    trimmed === "pi-coding-agent" ||
+    trimmed === "agy"
     ? trimmed
     : undefined;
 }
