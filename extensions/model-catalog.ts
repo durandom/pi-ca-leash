@@ -13,7 +13,7 @@ export interface RuntimeModelCatalogEntry {
 
 export interface RuntimeDriverModelCatalog {
   driver: RuntimeDriverName;
-  provider: "anthropic" | "openai-codex" | "pi-ai";
+  provider: "anthropic" | "openai-codex" | "pi-ai" | "google-gemini";
   defaultModel: string;
   aliases: Record<string, string>;
   recommendations: RuntimeModelRecommendation[];
