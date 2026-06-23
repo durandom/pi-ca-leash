@@ -78,7 +78,8 @@ const FAST = {
   readyTimeoutMs: 300,
   startupMinMs: 20,
   submitDelayMs: 3,
-  submitRetryDelayMs: 20,
+  startupQuietMs: 30,
+  maxStartupResubmits: 4,
   pollIntervalMs: 8,
   turnTimeoutMs: 2_000,
   quitGraceMs: 20,
@@ -178,22 +179,76 @@ test("interactive turn stays alive while activity streams past turnTimeoutMs (id
   await driver.dispose(sessionId);
 });
 
-test("interactive turn times out after turnTimeoutMs of total silence (genuine wedge)", async () => {
+test("interactive turn fails fast when the submit never starts the turn (cold-start wedge)", async () => {
   const sessionId = "sess-silent-wedge";
   const h = await makeHarness(sessionId);
   const fake = new FakePty();
 
-  // The submit lands but the agent never emits a single hook line → genuine
-  // wedge. The inactivity deadline must fire.
+  // The TUI never echoes the paste and never emits a hook line → the turn never
+  // started (the real claude-pty cold-start wedge). PTY stays silent, so the
+  // startup guard must re-submit a few times then fail FAST — long before the
+  // turn deadline (turnTimeoutMs, here the 2 s FAST default) would fire.
   fake.onWrite = async (data) => {
     if (data === "/quit\r") fake.exit(0);
-    // intentionally emit nothing on "\r"
+    // intentionally emit nothing else — a dead, silent PTY
   };
 
   const driver = new ClaudePtyDriver({
     ptySpawn: () => fake,
     configDir: h.configDir,
     ...FAST,
+  });
+
+  const events: DriverEventEnvelope[] = [];
+  const started = Date.now();
+  const handle = driver.run(
+    { sessionId, prompt: "hello", cwd: h.root, securityMode: "yolo", sessionStorageDir: h.sessionStorageDir },
+    (e) => {
+      events.push(e);
+    },
+  );
+  const result = await handle.done;
+  const elapsed = Date.now() - started;
+
+  assert.equal(result.code, 1, "wedged cold-start fails");
+  assert.ok(
+    events.some((e) => e.type === "error" && e.payload.code === "CLAUDE_PTY_NO_FIRST_ACTIVITY"),
+    "no-first-activity error emitted on a non-starting turn",
+  );
+  // Proves it failed via the fast startup guard, not the (much longer) turn deadline.
+  assert.ok(elapsed < 1_000, `failed fast (${elapsed}ms) well under turnTimeoutMs`);
+  // The guard re-submitted before giving up: 1 initial + maxStartupResubmits Enters.
+  assert.ok(
+    fake.writes.filter((w) => w === "\r").length >= 2,
+    "re-submitted at least once before failing",
+  );
+  await driver.dispose(sessionId);
+});
+
+test("interactive turn times out after turnTimeoutMs of silence once the turn has started", async () => {
+  const sessionId = "sess-stall-after-start";
+  const h = await makeHarness(sessionId);
+  const fake = new FakePty();
+
+  // The turn STARTS (one PostToolUse hook on the first Enter) then goes silent
+  // forever. Past first activity the inactivity deadline owns the turn, so this
+  // must surface as a turn timeout — NOT the startup no-first-activity guard.
+  let enters = 0;
+  fake.onWrite = async (data) => {
+    if (data === "\r") {
+      enters += 1;
+      if (enters === 1) {
+        await appendFile(h.hooksPath, toolLine("Read", { file_path: "/x" }, { is_error: false }));
+      }
+    }
+    if (data === "/quit\r") fake.exit(0);
+  };
+
+  const driver = new ClaudePtyDriver({
+    ptySpawn: () => fake,
+    configDir: h.configDir,
+    ...FAST,
+    startupQuietMs: 1_000, // keep the startup guard out of the way
     turnTimeoutMs: 120,
   });
 
@@ -206,10 +261,10 @@ test("interactive turn times out after turnTimeoutMs of total silence (genuine w
   );
   const result = await handle.done;
 
-  assert.equal(result.code, 1, "silent turn timed out");
+  assert.equal(result.code, 1, "stalled turn timed out");
   assert.ok(
     events.some((e) => e.type === "error" && e.payload.code === "CLAUDE_PTY_TURN_TIMEOUT"),
-    "turn-timeout error emitted on total silence",
+    "turn-timeout error emitted once activity has been seen",
   );
   await driver.dispose(sessionId);
 });
