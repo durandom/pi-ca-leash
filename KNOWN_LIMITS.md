@@ -56,6 +56,11 @@ This file is intentionally blunt.
    - The supported path is `PiCaLeashManagedPeerApi` from `@pi-claude-code-agent/intercom-bridge`.
    - If a downstream caller writes runtime/bridge state somewhere else, `/peer dashboard` and `peer_list` will not discover those peers.
 
+10. **The `claude-pty` interactive cold-start can intermittently fail to start a turn.**
+    - The Claude Code TUI occasionally swallows the first submit (Enter lost mid-render, or the pasted prompt lands in a not-yet-focused input), so the turn never begins. Observed at idle, not only under load.
+    - The driver detects this via PTY byte-silence (a real turn animates its status line) and re-submits up to `maxStartupResubmits` times, then fails fast with `code: "CLAUDE_PTY_NO_FIRST_ACTIVITY"` — well within ~20 s, instead of hanging until the much longer turn-inactivity deadline or an external staleness watchdog.
+    - Callers SHOULD treat `CLAUDE_PTY_NO_FIRST_ACTIVITY` as a transient, retryable failure: re-running the persona/turn typically succeeds on the next attempt.
+
 ## UX/coordination limits
 
 10. **Attention ack/snooze is local extension state.**

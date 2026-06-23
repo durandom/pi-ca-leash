@@ -94,11 +94,16 @@ export interface ClaudePtyDriverOptions {
   /** Delay between bracketed-paste of the prompt and the submitting Enter. */
   submitDelayMs?: number;
   /**
-   * Delay before retrying Enter when the prompt is still visible and no hook
-   * has fired. This covers transient Claude Code TUI overlays swallowing the
-   * first submit key.
+   * Quiet window (no PTY output) after submit that flags a non-starting turn.
+   * The interactive TUI animates its status line for the whole turn, so a real
+   * turn keeps `lastDataAt` advancing. Sustained PTY silence before the first
+   * hook line means the submit was swallowed (Enter lost mid-render, or the
+   * paste landed in a not-yet-focused input). On each quiet window we re-submit;
+   * after `maxStartupResubmits` we fail fast with `CLAUDE_PTY_NO_FIRST_ACTIVITY`.
    */
-  submitRetryDelayMs?: number;
+  startupQuietMs?: number;
+  /** Max prompt re-submits while waiting for the first turn activity. */
+  maxStartupResubmits?: number;
   /** Poll cadence for the hook-payload file. */
   pollIntervalMs?: number;
   /** Inactivity ceiling for a single turn before giving up. */
@@ -168,7 +173,11 @@ const DEFAULTS = {
   readyTimeoutMs: 15_000,
   startupMinMs: 1_500,
   submitDelayMs: 40,
-  submitRetryDelayMs: 1_000,
+  // Startup liveness: re-submit on each 4 s of pre-activity PTY silence, fail
+  // fast after 4 tries (~20 s) — well under the external staleness watchdog
+  // (300 s) so the lane sees a clear, fast failure instead of a silent wedge.
+  startupQuietMs: 4_000,
+  maxStartupResubmits: 4,
   pollIntervalMs: 120,
   // Idle (inactivity) ceiling for a turn, NOT a wall-clock cap: the turn loop
   // resets this deadline every time a hook line streams (tool_use/tool_result),
@@ -343,7 +352,8 @@ export class ClaudePtyDriver implements RuntimeDriver {
       readyTimeoutMs: options.readyTimeoutMs ?? DEFAULTS.readyTimeoutMs,
       startupMinMs: options.startupMinMs ?? DEFAULTS.startupMinMs,
       submitDelayMs: options.submitDelayMs ?? DEFAULTS.submitDelayMs,
-      submitRetryDelayMs: options.submitRetryDelayMs ?? DEFAULTS.submitRetryDelayMs,
+      startupQuietMs: options.startupQuietMs ?? DEFAULTS.startupQuietMs,
+      maxStartupResubmits: options.maxStartupResubmits ?? DEFAULTS.maxStartupResubmits,
       pollIntervalMs: options.pollIntervalMs ?? DEFAULTS.pollIntervalMs,
       turnTimeoutMs: options.turnTimeoutMs ?? DEFAULTS.turnTimeoutMs,
       quitGraceMs: options.quitGraceMs ?? DEFAULTS.quitGraceMs,
@@ -422,8 +432,13 @@ export class ClaudePtyDriver implements RuntimeDriver {
       session.proc.write(`\x1b[200~${input.prompt}\x1b[201~`);
       await sleep(this.opts.submitDelayMs);
       session.proc.write("\r");
-      const submittedAt = Date.now();
-      let submitRetried = false;
+      // Startup-liveness state. Until the first hook line of this turn lands,
+      // the turn may never have started (a swallowed submit). We watch PTY
+      // byte-liveness (session.lastDataAt) — a running turn animates its status
+      // line, a wedged one goes silent — and re-submit on each quiet window.
+      let sawFirstActivity = false;
+      let startupResubmits = 0;
+      let lastStartupActionAt = Date.now();
 
       // Wait for the turn to end: a Stop hook line. PostToolUse lines stream
       // tool_use/tool_result messages in the meantime. `deadline` is an INACTIVITY
@@ -456,16 +471,54 @@ export class ClaudePtyDriver implements RuntimeDriver {
         // actively-working turn (streaming tool calls) alive indefinitely; the
         // timeout below only fires after a full `turnTimeoutMs` of silence.
         if (sawActivity) {
+          sawFirstActivity = true;
           deadline = Date.now() + this.opts.turnTimeoutMs;
         }
-        if (
-          !submitRetried &&
-          Date.now() - submittedAt >= this.opts.submitRetryDelayMs &&
-          promptStillVisible(session.rawTail, input.prompt)
-        ) {
-          dbg("prompt still visible after submit; retrying Enter");
-          session.proc.write("\r");
-          submitRetried = true;
+        // Pre-activity startup guard: only runs until the turn proves it started
+        // (first hook line). A re-submit fires only when the PTY is genuinely
+        // QUIET — a running turn streams its status-line animation, so this never
+        // injects into an in-flight turn. After `maxStartupResubmits` quiet
+        // windows with no activity, fail FAST with a distinct code so the caller
+        // can retry, instead of waiting out the (much longer) turn deadline or
+        // the external staleness watchdog.
+        if (!sawFirstActivity) {
+          const quietFor = Date.now() - session.lastDataAt;
+          const sinceAction = Date.now() - lastStartupActionAt;
+          if (quietFor >= this.opts.startupQuietMs && sinceAction >= this.opts.startupQuietMs) {
+            if (startupResubmits >= this.opts.maxStartupResubmits) {
+              await onEvent({
+                type: "error",
+                payload: {
+                  message:
+                    `claude-pty turn never started: no hook activity and PTY silent for ` +
+                    `${quietFor}ms after ${startupResubmits} re-submit(s). The interactive ` +
+                    `TUI likely never accepted the prompt.`,
+                  code: "CLAUDE_PTY_NO_FIRST_ACTIVITY",
+                },
+              });
+              return { code: 1, signal: null };
+            }
+            // We are here only because the PTY is quiet → no turn is running.
+            // If the prompt is still on screen, the paste landed but the Enter
+            // was lost — just press Enter. If nothing rendered at all, the paste
+            // itself was lost — re-send it in full. Otherwise (screen has other
+            // content) nudge with a bare Enter; never re-inject prompt text where
+            // it could concatenate.
+            if (promptStillVisible(session.rawTail, input.prompt)) {
+              dbg("startup: prompt visible, no activity — re-pressing Enter");
+              session.proc.write("\r");
+            } else if (stripAnsi(session.rawTail).trim() === "") {
+              dbg("startup: blank screen, no activity — re-pasting prompt");
+              session.proc.write(`\x1b[200~${input.prompt}\x1b[201~`);
+              await sleep(this.opts.submitDelayMs);
+              session.proc.write("\r");
+            } else {
+              dbg("startup: no activity — nudging Enter");
+              session.proc.write("\r");
+            }
+            startupResubmits += 1;
+            lastStartupActionAt = Date.now();
+          }
         }
         if (Date.now() > deadline) {
           await onEvent({

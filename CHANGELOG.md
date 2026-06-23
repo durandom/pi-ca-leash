@@ -2,6 +2,15 @@
 
 All notable changes to this repository should be recorded here.
 
+## 1.5.0 - 2026-06-23
+
+### Fixed — `claude-pty` cold-start wedge now fails fast instead of hanging silently
+
+- The interactive `claude-pty` driver intermittently failed to start a turn: the TUI swallowed the first submit (Enter lost mid-render, or the paste landed in a not-yet-focused input), so the turn never began and the process sat silent until an external watchdog killed it (reproduced at idle, ~1 in 2 cold starts).
+- The driver now watches PTY byte-liveness (`session.lastDataAt`) — a real turn animates its status line, a wedged one goes silent — and re-submits the prompt on each quiet window (`startupQuietMs`, default 4 s). After `maxStartupResubmits` (default 4) windows with no activity it fails fast with a distinct `code: "CLAUDE_PTY_NO_FIRST_ACTIVITY"`, so callers can retry within ~20 s rather than hanging.
+- Replaced the old single, screen-scrape-gated Enter retry (`submitRetryDelayMs`) with this byte-liveness loop. The post-activity turn-inactivity ceiling (`turnTimeoutMs`) is unchanged.
+- **Behavior/API change:** the `submitRetryDelayMs` option is removed; `startupQuietMs` and `maxStartupResubmits` are added.
+
 ## 1.4.0 - 2026-06-20
 
 ### Added — Google Antigravity CLI (agy) runtime driver
